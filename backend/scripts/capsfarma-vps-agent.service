@@ -1,0 +1,19 @@
+[Unit]
+Description=CAPSFARMA VPS Agent
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+WorkingDirectory=/root/capsfarma-erp
+EnvironmentFile=/root/capsfarma-erp/.env
+ExecStart=/usr/bin/node /root/capsfarma-erp/backend/scripts/vps-agent.js
+Restart=always
+RestartSec=5
+User=root
+StandardOutput=append:/root/capsfarma-erp/backend/scripts/vps-agent.log
+StandardError=append:/root/capsfarma-erp/backend/scripts/vps-agent.log
+
+[Install]
+WantedBy=multi-user.target

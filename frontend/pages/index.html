@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ERP-CAPSFARMA</title>
+    <link rel="icon" type="image/png" href="./assets/branding/logo-empresa.png" />
+    <link rel="apple-touch-icon" href="./assets/branding/logo-empresa.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css?v=20260409-3" />
+    <link rel="stylesheet" href="./service-orders.css?v=20260409-1" />
+    <script src="./supabase/config.js?v=20260409-3"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script defer src="./service-orders.js?v=20260409-1"></script>
+    <script defer src="./app.js?v=20260410-6"></script>
+  </head>
+  <body>
+    <div class="page-shell">
+      <aside id="app-sidebar" class="sidebar" aria-label="Menu lateral">
+        <div class="sidebar-top">
+          <div class="sidebar-brand-shell">
+            <div class="sidebar-brand-badge" aria-hidden="true">
+              <img class="sidebar-brand-logo" src="./assets/branding/logo-empresa.png" alt="Logo CAPSFARMA" />
+            </div>
+          </div>
+
+          <button
+            id="sidebar-collapse-button"
+            class="sidebar-toggle-button"
+            type="button"
+            aria-label="Recolher menu lateral"
+            title="Recolher menu lateral"
+          >
+            <span id="sidebar-collapse-icon" aria-hidden="true">◀</span>
+          </button>
+        </div>
+
+        <div class="sidebar-divider" aria-hidden="true"></div>
+
+        <nav id="module-nav" class="module-nav sidebar-nav"></nav>
+
+        <div class="sidebar-divider sidebar-divider-footer" aria-hidden="true"></div>
+
+        <div class="sidebar-footer">
+          <button
+            id="sidebar-logout-button"
+            class="sidebar-logout-button"
+            type="button"
+            data-tooltip="Sair"
+            aria-label="Sair"
+            title="Sair"
+          >
+            <span class="nav-icon">⇦</span>
+            <span class="nav-label">Sair</span>
+          </button>
+        </div>
+      </aside>
+
+      <button
+        id="sidebar-backdrop"
+        class="sidebar-backdrop hidden"
+        type="button"
+        aria-label="Fechar menu lateral"
+      ></button>
+
+      <main class="main-content">
+        <section id="auth-screen" class="screen active">
+          <div class="auth-layout">
+            <section class="auth-showcase">
+              <div class="auth-showcase-backdrop"></div>
+              <div class="auth-showcase-orb auth-showcase-orb-a"></div>
+              <div class="auth-showcase-orb auth-showcase-orb-b"></div>
+
+              <div class="auth-showcase-content">
+                <span class="auth-tag">Painel Administrativo</span>
+
+                <div id="auth-brand-mark" class="auth-brand-mark" aria-hidden="true">
+                  <img id="auth-brand-logo" class="auth-brand-logo hidden" alt="Logo da empresa" />
+                  <div id="auth-brand-monogram" class="auth-brand-monogram">CA</div>
+                </div>
+
+                <div class="auth-copy-block">
+                  <p class="auth-kicker">ERP Corporativo</p>
+                  <h2 id="auth-brand-title">Bem-vindo ao ERP CAPSFARMA</h2>
+                  <p id="auth-brand-subtitle" class="auth-showcase-copy">
+                    Gerencie sua operacao com seguranca, agilidade e controle em tempo real.
+                  </p>
+                </div>
+
+                <div class="auth-feature-list">
+                  <article class="auth-feature-card">
+                    <strong>Seguranca</strong>
+                    <span>Autenticacao protegida e acesso controlado por perfil.</span>
+                  </article>
+                  <article class="auth-feature-card">
+                    <strong>Controle</strong>
+                    <span>Operacao centralizada com rastreabilidade e visao clara.</span>
+                  </article>
+                  <article class="auth-feature-card">
+                    <strong>Performance</strong>
+                    <span>Fluxo rapido para equipes administrativas, comerciais e tecnicas.</span>
+                  </article>
+                </div>
+
+                <div class="auth-showcase-footer">
+                  <div class="auth-status">
+                    <span class="status-dot auth-status-dot"></span>
+                    <span id="auth-connection-status">Supabase nao configurado</span>
+                  </div>
+                  <span id="auth-copyright">© 2026 CAPSFARMA. Todos os direitos reservados.</span>
+                </div>
+              </div>
+            </section>
+
+            <section class="auth-form-side">
+              <div class="auth-form-shell">
+                <div class="auth-form-panel">
+                  <div class="panel-header auth-panel-header">
+                    <div>
+                      <p id="auth-form-eyebrow" class="eyebrow auth-form-eyebrow">Painel Admin</p>
+                      <h3>Acessar sua conta</h3>
+                      <p class="auth-form-copy">Insira suas credenciais para continuar.</p>
+                    </div>
+                  </div>
+
+                  <form id="login-form" class="form-panel auth-login-form">
+                    <label class="auth-field">
+                      <span>Cod Usuario</span>
+                      <span class="input-shell">
+                        <span class="input-icon" aria-hidden="true">⌘</span>
+                        <input
+                          type="text"
+                          name="login_code"
+                          maxlength="3"
+                          pattern="[0-9]{3}"
+                          placeholder="001"
+                          inputmode="numeric"
+                          required
+                        />
+                      </span>
+                    </label>
+
+                    <label class="auth-field">
+                      <span>Senha</span>
+                      <span class="input-shell">
+                        <span class="input-icon" aria-hidden="true">◌</span>
+                        <input type="password" name="password" placeholder="Sua senha" required />
+                      </span>
+                    </label>
+
+                    <button class="primary-button auth-submit-button" type="submit">
+                      <span>Entrar</span>
+                      <span aria-hidden="true">→</span>
+                    </button>
+
+                    <button id="forgot-password-button" class="auth-link-button" type="button">
+                      Esqueci a senha
+                    </button>
+                  </form>
+                </div>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section id="app-screen" class="screen">
+          <header class="topbar">
+            <div class="topbar-title-block">
+              <button
+                id="sidebar-mobile-toggle"
+                class="topbar-icon-button topbar-sidebar-button"
+                type="button"
+                aria-label="Abrir menu lateral"
+                title="Abrir menu lateral"
+              >
+                <span aria-hidden="true">☰</span>
+              </button>
+              <p id="topbar-subtitle" class="eyebrow muted">Painel operacional</p>
+              <h2 id="page-title">Dashboard</h2>
+            </div>
+
+            <div class="topbar-actions">
+              <button class="topbar-icon-button" type="button" aria-label="Notificacoes">
+                <span>◔</span>
+              </button>
+              <div class="topbar-avatar" aria-hidden="true">
+                <span id="user-avatar-label">U</span>
+              </div>
+              <div class="user-badge">
+                <span id="user-role-label">Usuario</span>
+                <strong id="user-name-label">-</strong>
+              </div>
+            </div>
+          </header>
+
+          <div id="notification-banner" class="notification-banner hidden"></div>
+
+          <div id="module-container" class="module-container"></div>
+        </section>
+      </main>
+    </div>
+
+    <div id="auth-feedback-modal" class="modal-overlay auth-feedback-modal hidden" aria-hidden="true">
+      <div
+        class="modal-card auth-feedback-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="auth-feedback-title"
+        aria-describedby="auth-feedback-message"
+      >
+        <div id="auth-feedback-icon" class="auth-feedback-icon" aria-hidden="true">!</div>
+        <div class="auth-feedback-copy">
+          <p id="auth-feedback-title" class="auth-feedback-title">Erro</p>
+          <p id="auth-feedback-message" class="auth-feedback-message">Usuario ou senha invalidos.</p>
+        </div>
+        <button id="auth-feedback-close" class="primary-button auth-feedback-button" type="button">OK</button>
+      </div>
+    </div>
+  </body>
+</html>

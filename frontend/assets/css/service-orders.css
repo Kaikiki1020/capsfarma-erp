@@ -1,0 +1,219 @@
+.service-orders-module {
+  display: grid;
+  gap: 20px;
+}
+
+.service-order-alert-panel,
+.service-order-filters-card,
+.service-order-table-card,
+.service-order-details-card,
+.service-order-form-card {
+  padding: 22px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(73, 45, 24, 0.08);
+}
+
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.service-order-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.service-order-alert-list,
+.service-order-details-grid,
+.service-order-detail-columns,
+.service-order-filters-grid,
+.service-order-form-grid,
+.service-order-form-columns,
+.service-order-material-list,
+.service-order-assistant-list {
+  display: grid;
+  gap: 14px;
+}
+
+.service-order-alert-list,
+.service-order-details-grid,
+.service-order-detail-columns {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.service-order-filters-grid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.service-order-form-grid {
+  gap: 18px;
+}
+
+.service-order-form-section {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border-radius: 20px;
+  background: rgba(248, 250, 252, 0.84);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.service-order-form-section h4,
+.service-order-detail-panel h4 {
+  margin: 0;
+}
+
+.service-order-form-columns-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.service-order-form-columns-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.service-order-form-columns-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.service-order-assistant-shell {
+  display: grid;
+  gap: 10px;
+}
+
+.service-order-assistant-list {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.service-order-assistant-item,
+.service-order-material-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.service-order-material-row {
+  display: grid;
+  grid-template-columns: 1.4fr 120px 100px 1fr auto auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.service-order-form-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.service-order-action-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.service-order-detail-panel {
+  display: grid;
+  gap: 10px;
+  padding: 18px;
+  border-radius: 20px;
+  background: rgba(248, 250, 252, 0.84);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.service-order-detail-panel p {
+  margin: 0;
+  color: #334155;
+  line-height: 1.55;
+}
+
+.service-order-detail-inline,
+.service-order-material-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.service-order-timeline {
+  display: grid;
+  gap: 12px;
+}
+
+.service-order-timeline-item,
+.service-order-alert-card {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.service-order-progress-form {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.service-order-priority {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 7px 11px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.service-order-priority-low {
+  background: rgba(15, 146, 120, 0.12);
+  color: #0f9278;
+}
+
+.service-order-priority-medium {
+  background: rgba(59, 130, 246, 0.12);
+  color: #2563eb;
+}
+
+.service-order-priority-high {
+  background: rgba(245, 158, 11, 0.16);
+  color: #b45309;
+}
+
+.service-order-priority-urgent {
+  background: rgba(239, 68, 68, 0.16);
+  color: #dc2626;
+}
+
+@media (max-width: 1180px) {
+  .service-order-form-columns-4,
+  .service-order-form-columns-3,
+  .service-order-form-columns-2,
+  .service-order-material-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .service-order-alert-panel,
+  .service-order-filters-card,
+  .service-order-table-card,
+  .service-order-details-card,
+  .service-order-form-card {
+    padding: 18px;
+  }
+
+  .service-order-section-header,
+  .service-order-form-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

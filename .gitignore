@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+
+node_modules/
+backups/
+
+*.dump
+*.log
+
+database/supabase/.temp/
+database/supabase/.branches/
+
+.DS_Store
+Thumbs.db

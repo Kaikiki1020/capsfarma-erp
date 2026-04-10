@@ -1,0 +1,24 @@
+{
+  "name": "capsfarma-erp",
+  "version": "1.0.0",
+  "description": "ERP web para CAPSFARMA com:",
+  "main": "frontend/app.js",
+  "scripts": {
+    "supabase": "supabase",
+    "supabase:status": "supabase status",
+    "supabase:start": "supabase start",
+    "supabase:stop": "supabase stop",
+    "supabase:db:push": "supabase db push",
+    "vps:agent": "node backend/scripts/vps-agent.js",
+    "ops:backup": "bash backend/scripts/backup-supabase.sh",
+    "ops:restore": "bash backend/scripts/restore-supabase.sh",
+    "ops:smoke": "bash backend/scripts/smoke-test.sh",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "supabase": "^2.87.0"
+  }
+}
