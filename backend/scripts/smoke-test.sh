@@ -11,7 +11,7 @@ if [[ -f "${ENV_FILE}" ]]; then
   set +a
 fi
 
-APP_BASE_URL="${APP_BASE_URL:-http://127.0.0.1:8080}"
+APP_BASE_URL="${APP_BASE_URL:-http://127.0.0.1}"
 SUPABASE_URL="${SUPABASE_URL:-http://127.0.0.1:54321}"
 DB_CONTAINER="${SUPABASE_DB_CONTAINER:-supabase_db_capsfarma-erp}"
 

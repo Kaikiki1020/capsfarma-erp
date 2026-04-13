@@ -36,6 +36,10 @@ body {
     linear-gradient(135deg, #f8f9fc 0%, #f5f6fa 52%, #eef2f9 100%);
 }
 
+body.bootstrap-loading {
+  overflow: hidden;
+}
+
 body.auth-mode {
   background:
     radial-gradient(circle at top left, rgba(22, 93, 255, 0.15), transparent 24%),
@@ -53,6 +57,10 @@ textarea {
 .page-shell {
   display: block;
   min-height: 100vh;
+}
+
+body.bootstrap-loading .page-shell {
+  visibility: hidden;
 }
 
 body.auth-mode .page-shell {
@@ -145,6 +153,58 @@ body.auth-mode .main-content {
 
 .hidden {
   display: none !important;
+}
+
+.auth-bootstrap-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at top, rgba(22, 93, 255, 0.16), transparent 28%),
+    rgba(245, 248, 253, 0.92);
+  backdrop-filter: blur(10px);
+}
+
+.auth-bootstrap-card {
+  width: min(420px, 100%);
+  padding: 28px 24px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 30px 80px rgba(15, 23, 42, 0.14);
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  text-align: center;
+}
+
+.auth-bootstrap-card strong {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 1.2rem;
+}
+
+.auth-bootstrap-card p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.auth-bootstrap-spinner {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 4px solid rgba(22, 93, 255, 0.14);
+  border-top-color: var(--primary);
+  animation: auth-bootstrap-spin 0.9s linear infinite;
+}
+
+@keyframes auth-bootstrap-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .audit-filter-grid {

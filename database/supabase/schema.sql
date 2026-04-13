@@ -1514,7 +1514,7 @@ declare
   existing_role public.permission_roles;
 begin
   actor_user := public.require_permissions_admin(p_access_token);
-  normalized_name := upper(trim(coalesce(p_name, '')));
+  normalized_name := public.normalize_staff_role(p_name);
 
   if normalized_name = '' then
     raise exception 'Nome do papel e obrigatorio';
@@ -2204,6 +2204,7 @@ declare
   target_user public.app_users;
   normalized_role text;
   next_password_hash text;
+  password_changed boolean := false;
 begin
   actor_user := public.require_permissions_admin(p_access_token);
   normalized_role := public.normalize_staff_role(p_role);
@@ -2246,6 +2247,7 @@ begin
       raise exception 'Senha deve conter ao menos 6 caracteres';
     end if;
     next_password_hash := crypt(p_password, gen_salt('bf'));
+    password_changed := true;
   end if;
 
   update public.app_users
@@ -2258,7 +2260,54 @@ begin
     role = normalized_role,
     permission_role_id = p_permission_role_id,
     is_active = coalesce(p_is_active, true),
-    password_hash = next_password_hash
+    password_hash = next_password_hash,
+    failed_login_attempts = case when password_changed then 0 else failed_login_attempts end,
+    locked_until = case when password_changed then null else locked_until end,
+    last_failed_login_at = case when password_changed then null else last_failed_login_at end,
+    session_nonce = case when password_changed then gen_random_uuid() else session_nonce end
+  where id = p_user_id;
+end;
+$$;
+
+create or replace function public.reset_staff_user_password(
+  p_access_token text,
+  p_user_id uuid,
+  p_password text
+)
+returns void
+language plpgsql
+security definer
+as $$
+declare
+  actor_user public.app_users;
+  target_user public.app_users;
+begin
+  actor_user := public.require_ti_user(p_access_token);
+
+  select *
+  into target_user
+  from public.app_users
+  where id = p_user_id;
+
+  if not found then
+    raise exception 'Funcionario nao encontrado';
+  end if;
+
+  if coalesce(trim(coalesce(p_password, '')), '') = '' then
+    raise exception 'Senha e obrigatoria';
+  end if;
+
+  if length(p_password) < 6 then
+    raise exception 'Senha deve conter ao menos 6 caracteres';
+  end if;
+
+  update public.app_users
+  set
+    password_hash = crypt(p_password, gen_salt('bf')),
+    failed_login_attempts = 0,
+    locked_until = null,
+    last_failed_login_at = null,
+    session_nonce = gen_random_uuid()
   where id = p_user_id;
 end;
 $$;

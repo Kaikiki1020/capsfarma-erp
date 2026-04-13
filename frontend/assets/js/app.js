@@ -10,9 +10,11 @@ const MACHINING_STORAGE_KEY = "capsfarma_machining_data";
 const SALES_DOCUMENT_SETTINGS_STORAGE_KEY = "capsfarma_sales_document_settings";
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "capsfarma_sidebar_collapsed";
 const CLIENT_IP_STORAGE_KEY = "capsfarma_client_ip";
+const SESSION_STORAGE_KEY = "capsfarma_session";
 const LOGIN_MAX_ATTEMPTS = 5;
 const SIDEBAR_MOBILE_BREAKPOINT = 1180;
 const DEFAULT_BRAND_LOGO_PATH = "./assets/branding/logo-empresa.png";
+const AUTH_SESSION_INVALID_MESSAGE = "Sua sessao expirou ou nao e mais valida. Faca login novamente.";
 const NOTIFICATION_SOUND_PATHS = {
   created: "./assets/sounds/notification-created.wav",
   approved: "./assets/sounds/notification-approved.wav",
@@ -44,6 +46,22 @@ const MODULES = [
   { key: "vps", label: "Controle da VPS", tooltip: "Controle VPS", icon: "▤" },
   { key: "audit", label: "Auditoria", tooltip: "Central de Logs", icon: "◰" },
 ];
+const MODULE_IMPORT_PATHS = {
+  dashboard: "../../modules/dashboard/index.js",
+  products: "../../modules/produtos/index.js",
+  bom: "../../modules/bom/index.js",
+  inventory: "../../modules/estoque/index.js",
+  production: "../../modules/producao/index.js",
+  service_orders: "../../modules/ordem-servico/index.js",
+  machining: "../../modules/usinagem/index.js",
+  customers: "../../modules/clientes/index.js",
+  sales: "../../modules/vendas/index.js",
+  purchases: "../../modules/compras/index.js",
+  reports: "../../modules/relatorios/index.js",
+  permissions: "../../modules/permissoes/index.js",
+  vps: "../../modules/controle-vps/index.js",
+  audit: "../../modules/auditoria/index.js",
+};
 const STAFF_TYPES = ["TI", "ADMINISTRADOR", "USINAGEM", "MONTAGEM", "FABRICACAO", "VENDEDOR", "COMPRAS", "FINANCEIRO"];
 
 const state = {
@@ -130,11 +148,15 @@ const state = {
   sidebarOpen: false,
   clientIp: readCachedClientIp(),
   lastAuditedModule: "",
+  authBootstrapPending: true,
+  authRedirectInFlight: false,
 };
 
 const elements = {
   body: document.body,
   pageShell: document.querySelector(".page-shell"),
+  authBootstrapOverlay: document.querySelector("#auth-bootstrap-overlay"),
+  authBootstrapMessage: document.querySelector("#auth-bootstrap-message"),
   authScreen: document.querySelector("#auth-screen"),
   appScreen: document.querySelector("#app-screen"),
   loginForm: document.querySelector("#login-form"),
@@ -170,6 +192,26 @@ const elements = {
 };
 
 let activeModuleRenderFrame = 0;
+let activeModuleRenderRequestId = 0;
+const lazyModuleRegistry = new Map();
+let lastActiveModuleRenderPromise = Promise.resolve();
+const PERF_LOG_MIN_MS = 120;
+
+function startPerfMeasure(label) {
+  return {
+    label,
+    startedAt: performance.now(),
+  };
+}
+
+function endPerfMeasure(measure, details = "") {
+  if (!measure) return 0;
+  const duration = performance.now() - measure.startedAt;
+  if (duration >= PERF_LOG_MIN_MS) {
+    console.info(`[perf] ${measure.label}: ${duration.toFixed(1)}ms${details ? ` | ${details}` : ""}`);
+  }
+  return duration;
+}
 
 function debounce(fn, wait = 120) {
   let timerId = 0;
@@ -212,33 +254,17 @@ function init() {
   loadSalesDocumentSettings();
   renderAuthBranding();
   attachEvents();
+  attachGlobalErrorHandlers();
   primeNotificationAudio();
   syncSidebarState();
-  renderModuleNav();
   syncAppMode();
-
-  if (!hasSupabaseConfig()) {
-    showToast("Configure o arquivo supabase/config.js para conectar o sistema.", "warning");
-    renderLandingConnectionState(false);
-    void restoreSession();
-    return;
-  }
-
-  try {
-    state.supabase = window.supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey);
-    renderLandingConnectionState(true);
-  } catch {
-    renderLandingConnectionState(false);
-    showToast("Nao foi possivel iniciar a conexao com o Supabase.", "danger");
-  }
-
-  void restoreSession();
+  void bootstrapApplication();
 }
 
 function attachEvents() {
   elements.loginForm?.addEventListener("submit", handleLogin);
   elements.registerForm?.addEventListener("submit", handleRegister);
-  elements.sidebarLogoutButton.addEventListener("click", logout);
+  elements.sidebarLogoutButton?.addEventListener("click", () => logout());
   elements.sidebarCollapseButton?.addEventListener("click", toggleSidebarCollapse);
   elements.sidebarMobileToggle?.addEventListener("click", toggleSidebarOpen);
   elements.sidebarBackdrop?.addEventListener("click", () => {
@@ -253,6 +279,18 @@ function attachEvents() {
     if (event.target === elements.authFeedbackModal) {
       closeAuthFeedbackModal();
     }
+  });
+}
+
+function attachGlobalErrorHandlers() {
+  window.addEventListener("unhandledrejection", (event) => {
+    if (handleAuthenticationFailure(event.reason, { showMessage: true })) {
+      event.preventDefault();
+    }
+  });
+
+  window.addEventListener("error", (event) => {
+    handleAuthenticationFailure(event.error || event.message, { showMessage: true });
   });
 }
 
@@ -412,6 +450,7 @@ function getRequestedModuleFromLocation() {
 }
 
 function syncModuleLocation() {
+  if (!state.currentUser) return;
   const nextPath = state.activeModule === "dashboard" ? "/" : `/${state.activeModule}`;
   const currentPath = String(window.location.pathname || "/");
   const currentHash = String(window.location.hash || "");
@@ -432,11 +471,16 @@ function applyRequestedModuleFromHash() {
   state.activeModule = requested;
 }
 
-function handleHashChange() {
+async function handleHashChange() {
   if (!state.currentUser) return;
   applyRequestedModuleFromHash();
   renderModuleNav();
-  renderActiveModule();
+  try {
+    await loadDataForModule(state.activeModule);
+    renderActiveModule();
+  } catch (error) {
+    showToast(formatError(error), "danger");
+  }
 }
 
 function formatShortId(value) {
@@ -456,35 +500,117 @@ function formatShortId(value) {
   return String(hash).padStart(5, "0");
 }
 
-async function restoreSession() {
-  const rawSession = localStorage.getItem("capsfarma_session");
-  if (!rawSession) {
+function setAuthBootstrapLoading(isLoading, message = "Validando sessao...") {
+  state.authBootstrapPending = Boolean(isLoading);
+  elements.body.classList.toggle("bootstrap-loading", state.authBootstrapPending);
+  elements.authBootstrapOverlay?.classList.toggle("hidden", !state.authBootstrapPending);
+  if (elements.authBootstrapMessage) {
+    elements.authBootstrapMessage.textContent = message;
+  }
+}
+
+function readPersistedSession() {
+  try {
+    const rawSession = localStorage.getItem(SESSION_STORAGE_KEY);
+    if (!rawSession) return null;
+
+    const session = JSON.parse(rawSession);
+    return session && typeof session === "object" ? session : null;
+  } catch {
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+    return null;
+  }
+}
+
+function isAuthenticationError(error) {
+  const message = String(error?.message || error || "").toLowerCase();
+  return [
+    "token jwt ausente",
+    "token jwt invalido",
+    "token jwt expirado",
+    "sessao invalida",
+    "sessao expirada",
+    "usuario inativo",
+    "nao autenticado",
+    "unauthorized",
+    "401",
+  ].some((fragment) => message.includes(fragment));
+}
+
+function handleAuthenticationFailure(error, { showMessage = false } = {}) {
+  if (!isAuthenticationError(error) || state.authRedirectInFlight) {
+    return false;
+  }
+
+  state.authRedirectInFlight = true;
+  setAuthBootstrapLoading(false);
+  logout({ resetRoute: true });
+  if (showMessage) {
+    showToast(AUTH_SESSION_INVALID_MESSAGE, "warning");
+  }
+  state.authRedirectInFlight = false;
+  return true;
+}
+
+async function bootstrapApplication() {
+  const perf = startPerfMeasure("bootstrapApplication");
+  setAuthBootstrapLoading(true, "Validando sessao...");
+
+  if (!hasSupabaseConfig()) {
+    renderLandingConnectionState(false);
+    logout({ resetRoute: true });
+    setAuthBootstrapLoading(false);
+    showToast("Configure o arquivo supabase/config.js para conectar o sistema.", "warning");
     return;
   }
 
   try {
-    const session = JSON.parse(rawSession);
-    if (!session?.accessToken) {
-      localStorage.removeItem("capsfarma_session");
-      return;
-    }
+    state.supabase = window.supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey);
+    renderLandingConnectionState(true);
+  } catch (error) {
+    renderLandingConnectionState(false);
+    logout({ resetRoute: true });
+    setAuthBootstrapLoading(false);
+    showToast(formatError(error), "danger");
+    return;
+  }
+
+  const session = readPersistedSession();
+  if (!session?.accessToken || !session?.user) {
+    logout({ resetRoute: true });
+    setAuthBootstrapLoading(false);
+    return;
+  }
+
+  try {
     state.currentUser = session.user;
     state.accessToken = session.accessToken || "";
     state.permissions = session.permissions || [];
-
-    if (state.supabase) {
-      await loadPermissions();
-      persistSession();
-    }
-
+    await loadPermissions();
+    persistSession();
+    setAuthBootstrapLoading(true, "Carregando sistema...");
     showApp();
     await renderApp();
-  } catch {
-    state.currentUser = null;
-    state.accessToken = "";
-    state.permissions = [];
-    localStorage.removeItem("capsfarma_session");
-    showToast("Sua sessao expirou ou nao e mais valida. Faca login novamente.", "warning");
+    void loadSalesDocumentSettingsFromServer()
+      .then(() => {
+        persistSession();
+        if (state.activeModule === "sales") {
+          requestActiveModuleRender();
+        }
+      })
+      .catch((error) => {
+        if (!handleAuthenticationFailure(error, { showMessage: true })) {
+          console.error("sales settings bootstrap", error);
+        }
+      });
+  } catch (error) {
+    if (!handleAuthenticationFailure(error, { showMessage: true })) {
+      logout({ resetRoute: true });
+      showToast(formatError(error), "danger");
+    }
+  } finally {
+    endPerfMeasure(perf, `module=${state.activeModule}`);
+    setAuthBootstrapLoading(false);
   }
 }
 
@@ -512,7 +638,7 @@ async function handleRegister(event) {
     if (!user) throw new Error("Nao foi possivel concluir o cadastro.");
 
     showToast(
-      ["ADMNISTRADOR", "ADMINISTRADOR"].includes(user.role)
+      isAdministratorRole(user.role)
         ? "Primeiro usuario criado como ADMINISTRADOR."
         : "Usuario cadastrado com sucesso.",
       "success"
@@ -524,6 +650,7 @@ async function handleRegister(event) {
 }
 
 async function handleLogin(event) {
+  const perf = startPerfMeasure("handleLogin");
   event.preventDefault();
 
   if (!state.supabase) {
@@ -547,29 +674,44 @@ async function handleLogin(event) {
     state.currentUser = user;
     state.accessToken = user.access_token || "";
     await loadPermissions();
-    await loadSalesDocumentSettingsFromServer();
     persistSession();
     showApp();
-    renderApp();
+    await renderApp();
+    void loadSalesDocumentSettingsFromServer()
+      .then(() => {
+        persistSession();
+        if (state.activeModule === "sales") {
+          requestActiveModuleRender();
+        }
+      })
+      .catch((error) => {
+        if (!handleAuthenticationFailure(error, { showMessage: true })) {
+          console.error("sales settings login", error);
+        }
+      });
     showToast("Login realizado com sucesso.", "success");
     event.currentTarget?.reset();
   } catch (error) {
     showToast(formatError(error), "danger");
+  } finally {
+    endPerfMeasure(perf);
   }
 }
 
 async function loadPermissions() {
+  const perf = startPerfMeasure("loadPermissions");
   const { data, error } = await state.supabase.rpc("get_my_permissions", {
     p_access_token: state.accessToken,
   });
 
   if (error) throw error;
   state.permissions = data || [];
+  endPerfMeasure(perf, `permissions=${state.permissions.length}`);
 }
 
 function persistSession() {
   localStorage.setItem(
-    "capsfarma_session",
+    SESSION_STORAGE_KEY,
     JSON.stringify({
       user: state.currentUser,
       accessToken: state.accessToken,
@@ -578,7 +720,7 @@ function persistSession() {
   );
 }
 
-function logout() {
+function logout({ resetRoute = true } = {}) {
   stopDashboardAutoRefresh();
   if (state.purchaseChannel && state.supabase) {
     state.supabase.removeChannel(state.purchaseChannel);
@@ -656,9 +798,21 @@ function logout() {
   state.dashboardLastUpdatedAt = "";
   state.dashboardRefreshInFlight = false;
   state.lastAuditedModule = "";
-  localStorage.removeItem("capsfarma_session");
+  elements.moduleNav.innerHTML = "";
+  elements.moduleContainer.innerHTML = "";
+  elements.notificationBanner.classList.add("hidden");
+  elements.pageTitle.textContent = "Dashboard";
+  elements.topbarSubtitle.textContent = "Painel operacional";
+  elements.userNameLabel.textContent = "-";
+  elements.userRoleLabel.textContent = "Usuario";
+  elements.userAvatarLabel.textContent = "U";
+  state.activeModule = "dashboard";
+  localStorage.removeItem(SESSION_STORAGE_KEY);
   elements.appScreen.classList.remove("active");
   elements.authScreen.classList.add("active");
+  if (resetRoute && (window.location.pathname !== "/" || window.location.hash)) {
+    window.history.replaceState({}, "", "/");
+  }
   syncAppMode();
   renderAuthBranding();
 }
@@ -672,7 +826,13 @@ function showApp() {
 }
 
 async function renderApp() {
+  const perf = startPerfMeasure("renderApp");
   try {
+    if (!state.currentUser || !state.accessToken) {
+      logout({ resetRoute: true });
+      return;
+    }
+
     elements.userNameLabel.textContent = getLoggedUserName("-");
     elements.userRoleLabel.textContent = formatStaffRole(state.currentUser.role);
     elements.userAvatarLabel.textContent = getUserInitials(getLoggedUserName(""));
@@ -680,19 +840,38 @@ async function renderApp() {
 
     applyRequestedModuleFromHash();
     renderModuleNav();
-    await loadAllVisibleData();
     renderActiveModule();
+    void loadDataForModule(state.activeModule)
+      .then(() => {
+        requestActiveModuleRender();
+      })
+      .catch((error) => {
+        if (handleAuthenticationFailure(error, { showMessage: true })) {
+          return;
+        }
+        showToast(formatError(error), "danger");
+      });
     startDashboardAutoRefresh();
     watchPurchaseRequests();
     subscribeToPurchaseNotifications();
     watchServiceOrders();
     subscribeToServiceOrderNotifications();
   } catch (error) {
+    if (handleAuthenticationFailure(error, { showMessage: true })) {
+      return;
+    }
     showToast(formatError(error), "danger");
+  } finally {
+    endPerfMeasure(perf, `module=${state.activeModule}`);
   }
 }
 
 function renderModuleNav() {
+  if (!state.currentUser) {
+    elements.moduleNav.innerHTML = "";
+    return;
+  }
+
   const allowedModules = MODULES.filter((module) => hasPermission(module.key, "view"));
   if (!allowedModules.some((module) => module.key === state.activeModule)) {
     state.activeModule = allowedModules[0]?.key || "dashboard";
@@ -754,16 +933,28 @@ function renderModuleNav() {
       }
       renderModuleNav();
       renderActiveModule();
+      void loadDataForModule(state.activeModule)
+        .then(() => {
+          requestActiveModuleRender();
+        })
+        .catch((error) => {
+          if (handleAuthenticationFailure(error, { showMessage: true })) {
+            return;
+          }
+          showToast(formatError(error), "danger");
+        });
     });
   });
 }
 
 async function loadAllVisibleData() {
+  const perf = startPerfMeasure("loadAllVisibleData");
   if (!state.supabase) {
     if (hasPermission("service_orders", "view")) {
       await loadServiceOrdersTable();
     }
     loadMachiningData();
+    endPerfMeasure(perf, "mode=offline");
     return;
   }
 
@@ -797,6 +988,190 @@ async function loadAllVisibleData() {
   await Promise.all(loaders);
   loadMachiningData();
   state.dashboardLastUpdatedAt = new Date().toISOString();
+  endPerfMeasure(perf, `loaders=${loaders.length}`);
+}
+
+async function loadDashboardData() {
+  const perf = startPerfMeasure("loadDashboardData");
+  if (!state.supabase) {
+    if (hasPermission("service_orders", "view")) {
+      await loadServiceOrdersTable();
+    }
+    loadMachiningData();
+    endPerfMeasure(perf, "mode=offline");
+    return;
+  }
+
+  const range = getDashboardDateRange();
+  const previousRange = getPreviousDashboardDateRange(range);
+  const dashboardFrom = previousRange.from || range.from;
+  const dashboardTo = range.to;
+  const loaders = [];
+
+  if (hasPermission("products", "view")) loaders.push(loadDashboardProductsData());
+  if (hasPermission("production", "view")) loaders.push(loadDashboardProductionData(dashboardFrom, dashboardTo));
+  if (hasPermission("service_orders", "view")) loaders.push(loadDashboardServiceOrdersData(dashboardFrom, dashboardTo));
+  if (hasPermission("sales", "view")) loaders.push(loadDashboardSalesData(dashboardFrom, dashboardTo));
+  if (hasPermission("purchases", "view")) loaders.push(loadDashboardPurchasesData(dashboardFrom, dashboardTo));
+
+  await Promise.all(loaders);
+  loadMachiningData();
+  state.dashboardLastUpdatedAt = new Date().toISOString();
+  endPerfMeasure(perf, `loaders=${loaders.length}`);
+}
+
+async function loadDashboardProductsData() {
+  const perf = startPerfMeasure("loadDashboardProductsData");
+  const { data, error } = await state.supabase
+    .from("products")
+    .select("id,name,unit,current_stock,minimum_stock")
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  state.moduleData.products = data || [];
+  endPerfMeasure(perf, `rows=${state.moduleData.products.length}`);
+}
+
+async function loadDashboardProductionData(fromDate, toDate) {
+  const perf = startPerfMeasure("loadDashboardProductionData");
+  let query = state.supabase
+    .from("production_orders")
+    .select("id,order_number,product_id,product_code,product_name,batch_size,status,planned_start,planned_end,created_at,notes");
+  if (fromDate) {
+    query = query.gte("planned_start", fromDate);
+  }
+  if (toDate) {
+    query = query.lte("planned_start", toDate);
+  }
+  const { data, error } = await query.order("created_at", { ascending: false });
+  if (error) throw error;
+  state.moduleData.production = data || [];
+  syncMachiningDerivedData();
+  endPerfMeasure(perf, `rows=${state.moduleData.production.length}`);
+}
+
+async function loadDashboardServiceOrdersData(fromDate, toDate) {
+  const perf = startPerfMeasure("loadDashboardServiceOrdersData");
+  let query = state.supabase
+    .from("service_orders")
+    .select("id,order_number,customer_name,responsible_name,status,opened_at,created_at");
+  if (fromDate) {
+    query = query.gte("opened_at", fromDate);
+  }
+  if (toDate) {
+    query = query.lte("opened_at", toDate);
+  }
+  const { data, error } = await query.order("created_at", { ascending: false });
+  if (error) throw error;
+  state.moduleData.serviceOrders = data || [];
+  endPerfMeasure(perf, `rows=${state.moduleData.serviceOrders.length}`);
+}
+
+async function loadDashboardSalesData(fromDate, toDate) {
+  const perf = startPerfMeasure("loadDashboardSalesData");
+  let query = state.supabase
+    .from("sales")
+    .select("id,sale_date,created_at,delivery_date,customer_name,sale_number,status,payment_method,subtotal_amount,discount_amount,total_amount,sale_items,production_generated,production_order_ids,contract_notes");
+  if (fromDate) {
+    query = query.gte("sale_date", fromDate);
+  }
+  if (toDate) {
+    query = query.lte("sale_date", toDate);
+  }
+  const { data, error } = await query.order("created_at", { ascending: false });
+  if (error) throw error;
+  state.moduleData.sales = data || [];
+  endPerfMeasure(perf, `rows=${state.moduleData.sales.length}`);
+}
+
+async function loadDashboardPurchasesData(fromDate, toDate) {
+  const perf = startPerfMeasure("loadDashboardPurchasesData");
+  let query = state.supabase
+    .from("purchase_requests")
+    .select("id,created_at,requester_name,requester_id,department,urgency,status,request_items,purchase_details,notifications");
+  if (fromDate) {
+    query = query.gte("created_at", `${fromDate}T00:00:00`);
+  }
+  if (toDate) {
+    query = query.lte("created_at", `${toDate}T23:59:59`);
+  }
+  const { data, error } = await query.order("created_at", { ascending: false });
+  if (error) throw error;
+  state.moduleData.purchases = data || [];
+  endPerfMeasure(perf, `rows=${state.moduleData.purchases.length}`);
+}
+
+async function loadDataForModule(moduleKey) {
+  const perf = startPerfMeasure(`loadDataForModule:${moduleKey}`);
+  if (moduleKey === "dashboard") {
+    await loadDashboardData();
+    endPerfMeasure(perf);
+    return;
+  }
+
+  if (moduleKey === "reports") {
+    await loadAllVisibleData();
+    endPerfMeasure(perf);
+    return;
+  }
+
+  if (!state.supabase) {
+    if (moduleKey === "service_orders") {
+      await loadServiceOrdersTable();
+    }
+    loadMachiningData();
+    endPerfMeasure(perf, "mode=offline");
+    return;
+  }
+
+  const loaders = [];
+
+  if (moduleKey === "permissions" && hasPermission("permissions", "view")) {
+    loaders.push(loadPermissionsAdminData());
+  }
+  if (moduleKey === "products" && hasPermission("products", "view")) {
+    loaders.push(loadProductsTable());
+  }
+  if (moduleKey === "bom" && hasPermission("bom", "view")) {
+    loaders.push(loadBomData());
+  }
+  if (moduleKey === "inventory" && hasPermission("inventory", "view")) {
+    loaders.push(loadInventoryMovementsTable());
+  }
+  if (moduleKey === "production" && hasPermission("production", "view")) {
+    loaders.push(loadTable("production_orders", "production"));
+    if (!hasPermission("permissions", "view")) {
+      loaders.push(loadAssignableUsers());
+    }
+  }
+  if (moduleKey === "service_orders" && hasPermission("service_orders", "view")) {
+    loaders.push(loadServiceOrdersTable());
+    if (!hasPermission("permissions", "view")) {
+      loaders.push(loadAssignableUsers());
+    }
+  }
+  if (moduleKey === "customers" && hasPermission("customers", "view")) {
+    loaders.push(loadTable("customers", "customers"));
+  }
+  if (moduleKey === "sales" && hasPermission("sales", "view")) {
+    loaders.push(loadTable("sales", "sales"));
+  }
+  if (moduleKey === "purchases" && hasPermission("purchases", "view")) {
+    loaders.push(loadTable("purchase_requests", "purchases"));
+    if (!hasPermission("permissions", "view")) {
+      loaders.push(loadAssignableUsers());
+    }
+  }
+  if (moduleKey === "vps" && hasPermission("vps", "view")) {
+    loaders.push(loadVpsControlData());
+  }
+  if (moduleKey === "audit" && hasPermission("audit", "view")) {
+    loaders.push(loadAuditLogs());
+  }
+
+  await Promise.all(loaders);
+  loadMachiningData();
+  state.dashboardLastUpdatedAt = new Date().toISOString();
+  endPerfMeasure(perf, `loaders=${loaders.length}`);
 }
 
 async function loadAssignableUsers() {
@@ -860,6 +1235,7 @@ async function callVpsControlApi(view, options = {}) {
 }
 
 async function loadVpsControlData() {
+  const perf = startPerfMeasure("loadVpsControlData");
   const [snapshot, logs] = await Promise.all([
     callVpsControlApi("snapshot"),
     callVpsControlApi("logs", {
@@ -890,6 +1266,7 @@ async function loadVpsControlData() {
   if (state.vpsControl.databaseSelectedTable) {
     await loadVpsDatabaseTableDetail(state.vpsControl.databaseSelectedTable);
   }
+  endPerfMeasure(perf, `logs=${state.vpsControl.logs.length}`);
 }
 
 async function loadVpsDatabaseTableDetail(tableName) {
@@ -904,6 +1281,7 @@ async function loadVpsDatabaseTableDetail(tableName) {
 }
 
 async function loadPermissionsAdminData() {
+  const perf = startPerfMeasure("loadPermissionsAdminData");
   const { data, error } = await state.supabase.rpc("get_permissions_admin_snapshot", {
     p_access_token: state.accessToken,
   });
@@ -911,9 +1289,11 @@ async function loadPermissionsAdminData() {
 
   state.permissionRoles = data?.roles || [];
   state.moduleData.users = data?.users || [];
+  endPerfMeasure(perf, `roles=${state.permissionRoles.length} users=${state.moduleData.users.length}`);
 }
 
 async function loadTable(tableName, stateKey) {
+  const perf = startPerfMeasure(`loadTable:${tableName}`);
   const { data, error } = await state.supabase.from(tableName).select("*").order("created_at", { ascending: false });
   if (error) throw error;
   state.moduleData[stateKey] = data || [];
@@ -921,6 +1301,7 @@ async function loadTable(tableName, stateKey) {
   if (stateKey === "production" || stateKey === "inventory") {
     syncMachiningDerivedData();
   }
+  endPerfMeasure(perf, `rows=${state.moduleData[stateKey].length}`);
 }
 
 async function loadProductsTable() {
@@ -954,6 +1335,7 @@ async function loadInventoryMovementsTable() {
 }
 
 async function loadBomData() {
+  const perf = startPerfMeasure("loadBomData");
   try {
     const [{ data: materials, error: materialsError }, { data: structures, error: structuresError }] = await Promise.all([
       state.supabase.from("bom_materials").select("*").order("created_at", { ascending: false }),
@@ -966,6 +1348,7 @@ async function loadBomData() {
     state.moduleData.bomMaterials = materials || [];
     state.moduleData.bomStructures = structures || [];
     state.dashboardLastUpdatedAt = new Date().toISOString();
+    endPerfMeasure(perf, `materials=${state.moduleData.bomMaterials.length} structures=${state.moduleData.bomStructures.length}`);
   } catch (error) {
     state.moduleData.bomMaterials = [];
     state.moduleData.bomStructures = [];
@@ -1024,72 +1407,62 @@ async function loadAuditLogs() {
 }
 
 function renderActiveModule() {
-  switch (state.activeModule) {
-    case "dashboard":
-      elements.moduleContainer.innerHTML = renderDashboard();
-      bindDashboardEvents();
-      break;
-    case "products":
-      elements.moduleContainer.innerHTML = renderProductsModule();
-      bindProductsModuleEvents();
-      break;
-    case "permissions":
-      elements.moduleContainer.innerHTML = renderPermissionsModule();
-      bindPermissionEvents();
-      break;
-    case "vps":
-      elements.moduleContainer.innerHTML = renderVpsControlModule();
-      bindVpsControlEvents();
-      break;
-    case "audit":
-      elements.moduleContainer.innerHTML = renderAuditModule();
-      bindAuditModuleEvents();
-      break;
-    case "bom":
-      elements.moduleContainer.innerHTML = renderBomModule();
-      bindBomModuleEvents();
-      break;
-    case "inventory":
-      elements.moduleContainer.innerHTML = renderInventoryModule();
-      bindInventoryModuleEvents();
-      break;
-    case "production":
-      elements.moduleContainer.innerHTML = renderProductionModule();
-      bindProductionModuleEvents();
-      break;
-    case "service_orders":
-      elements.moduleContainer.innerHTML = renderServiceOrdersModule();
-      bindServiceOrdersModuleEvents();
-      break;
-    case "machining":
-      elements.moduleContainer.innerHTML = renderMachiningModule();
-      bindMachiningModuleEvents();
-      break;
-    case "customers":
-      elements.moduleContainer.innerHTML = renderCustomersModule();
-      bindCustomersModuleEvents();
-      break;
-    case "sales":
-      elements.moduleContainer.innerHTML = renderSalesModule();
-      bindSalesModuleEvents();
-      break;
-    case "purchases":
-      elements.moduleContainer.innerHTML = renderPurchasesModule();
-      bindPurchasesModuleEvents();
-      break;
-    case "reports":
-      elements.moduleContainer.innerHTML = renderReportsModule();
-      bindReportsModuleEvents();
-      break;
-    default:
-      elements.moduleContainer.innerHTML = renderDashboard();
-      bindDashboardEvents();
+  const moduleKey = MODULES.some((module) => module.key === state.activeModule) ? state.activeModule : "dashboard";
+  const requestId = ++activeModuleRenderRequestId;
+  elements.moduleContainer.innerHTML = renderModuleLoadingState(moduleKey);
+  lastActiveModuleRenderPromise = renderActiveModuleAsync(moduleKey, requestId);
+  return lastActiveModuleRenderPromise;
+}
+
+async function renderActiveModuleAsync(moduleKey, requestId) {
+  try {
+    const moduleController = await importModuleController(moduleKey);
+    if (requestId !== activeModuleRenderRequestId) return;
+
+    const html = typeof moduleController.render === "function"
+      ? moduleController.render()
+      : `<div class="empty-state">Modulo ${escapeHtml(moduleKey)} indisponivel.</div>`;
+
+    elements.moduleContainer.innerHTML = html;
+
+    if (typeof moduleController.bind === "function") {
+      moduleController.bind();
+    }
+
+    bindCurrencyInputs(elements.moduleContainer);
+    bindEditActions();
+    bindDeleteActions();
+    trackModuleAccessIfNeeded();
+  } catch (error) {
+    if (requestId !== activeModuleRenderRequestId) return;
+    elements.moduleContainer.innerHTML = `
+      <section class="module-panel">
+        <div class="empty-state">${escapeHtml(formatError(error))}</div>
+      </section>
+    `;
+  }
+}
+
+function renderModuleLoadingState(moduleKey) {
+  const moduleLabel = MODULES.find((module) => module.key === moduleKey)?.label || "Modulo";
+  return `
+    <section class="module-panel">
+      <div class="empty-state">Carregando ${escapeHtml(moduleLabel)}...</div>
+    </section>
+  `;
+}
+
+async function importModuleController(moduleKey) {
+  const normalizedModuleKey = MODULE_IMPORT_PATHS[moduleKey] ? moduleKey : "dashboard";
+  if (lazyModuleRegistry.has(normalizedModuleKey)) {
+    return lazyModuleRegistry.get(normalizedModuleKey);
   }
 
-  bindCurrencyInputs(elements.moduleContainer);
-  bindEditActions();
-  bindDeleteActions();
-  trackModuleAccessIfNeeded();
+  const modulePath = MODULE_IMPORT_PATHS[normalizedModuleKey];
+  const importedModule = await import(modulePath);
+  const moduleController = importedModule.default || importedModule;
+  lazyModuleRegistry.set(normalizedModuleKey, moduleController);
+  return moduleController;
 }
 
 function startDashboardAutoRefresh() {
@@ -1112,7 +1485,7 @@ async function refreshDashboardData({ silent = false } = {}) {
 
   state.dashboardRefreshInFlight = true;
   try {
-    await loadAllVisibleData();
+    await loadDashboardData();
     if (state.activeModule === "dashboard") {
       renderActiveModule();
     }
@@ -1802,12 +2175,17 @@ function bindDashboardEvents() {
   });
 
   document.querySelectorAll("[data-dashboard-module]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
       const moduleKey = button.dataset.dashboardModule;
       if (!moduleKey || !hasPermission(moduleKey, "view")) return;
-      state.activeModule = moduleKey;
-      renderModuleNav();
-      renderActiveModule();
+      try {
+        state.activeModule = moduleKey;
+        renderModuleNav();
+        await loadDataForModule(moduleKey);
+        renderActiveModule();
+      } catch (error) {
+        showToast(formatError(error), "danger");
+      }
     });
   });
 
@@ -1824,7 +2202,7 @@ function bindDashboardEvents() {
   });
 }
 
-function openSaleFromDashboard(saleId) {
+async function openSaleFromDashboard(saleId) {
   const sale = (state.moduleData.sales || []).find((item) => item.id === saleId);
   if (!sale || !hasPermission("sales", "view")) return;
 
@@ -1832,7 +2210,7 @@ function openSaleFromDashboard(saleId) {
   state.openAccordionKey = "sales-form";
   state.activeModule = "sales";
   renderModuleNav();
-  renderActiveModule();
+  await renderActiveModule();
   document.querySelector("#sales-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
@@ -2935,7 +3313,7 @@ function renderPermissionsModule() {
   const isRoleFormOpen = state.openAccordionKey === "permission-role-form";
   const activeUsers = users.filter((user) => user.is_active).length;
   const inactiveUsers = users.filter((user) => !user.is_active).length;
-  const criticalUsers = users.filter((user) => ["TI", "ADMNISTRADOR", "ADMINISTRADOR"].includes(user.role)).length;
+  const criticalUsers = users.filter((user) => isPermissionsAdminRole(user.role)).length;
 
   return `
     <section class="module-panel permissions-module">
@@ -3075,13 +3453,13 @@ function renderPermissionRolePermissionGrid(roleDraft) {
   const normalizedPermissions = normalizeRolePermissions(roleDraft.permissions, roleDraft.name);
   return normalizedPermissions.map((permission) => {
     const module = MODULES.find((item) => item.key === permission.module_key);
-    const normalizedRoleName = String(roleDraft.name || "").trim().toUpperCase();
+    const normalizedRoleName = normalizePermissionRoleName(roleDraft.name);
     const lockedPermissions = permission.module_key === "permissions"
-      && !["TI", "ADMNISTRADOR", "ADMINISTRADOR"].includes(normalizedRoleName);
+      && !["TI", "ADMINISTRADOR"].includes(normalizedRoleName);
     const lockedVpsModule = permission.module_key === "vps"
       && normalizedRoleName !== "TI";
     const lockedDashboardEdit = permission.module_key === "dashboard"
-      && !["TI", "ADMNISTRADOR", "ADMINISTRADOR"].includes(normalizedRoleName);
+      && !["TI", "ADMINISTRADOR"].includes(normalizedRoleName);
     return `
       <article class="permission-toggle-card ${(lockedPermissions || lockedVpsModule) ? "is-locked" : ""}">
         <div>
@@ -3202,7 +3580,7 @@ function renderEmployeeModal() {
             <label>Email<input type="email" name="email" value="${escapeHtml(state.employeeDraft.email)}" placeholder="email@empresa.com" /></label>
             <label>Senha ${state.employeeFormMode === "edit" ? "" : "*"}<input type="password" name="password" placeholder="${state.employeeFormMode === "edit" ? "Nova senha do funcionario" : "Minimo 6 caracteres"}" ${state.employeeFormMode === "edit" ? "" : "required"} /></label>
           </div>
-          ${state.employeeFormMode === "edit" ? `<p class="hint">ADMINISTRADOR e TI podem redefinir a senha do funcionario por este formulario. Deixe em branco para manter a senha atual.</p>` : ""}
+          ${state.employeeFormMode === "edit" ? `<p class="hint">TI pode redefinir a senha de qualquer funcionario por este formulario. ADMINISTRADOR tambem pode alterar a senha durante a edicao. Deixe em branco para manter a senha atual.</p>` : ""}
           <div class="product-form-row">
             <label>Departamento<select name="department" required>${departmentOptions}</select></label>
             <label>Papel de Permissao<select name="permission_role_id" required><option value="">Selecione</option>${permissionRoleOptions}</select></label>
@@ -6764,11 +7142,28 @@ function buildAuditExportHtml(logs) {
 }
 
 function formatStaffRole(role) {
-  const normalizedRole = String(role || "").trim();
-  if (normalizedRole === "ADMNISTRADOR" || normalizedRole === "ADMINISTRADOR") {
+  const normalizedRole = normalizePermissionRoleName(role);
+  if (normalizedRole === "ADMINISTRADOR") {
     return "ADMINISTRADOR";
   }
   return normalizedRole || "Usuario";
+}
+
+function normalizePermissionRoleName(role) {
+  const normalizedRole = String(role || "").trim().toUpperCase();
+  if (normalizedRole === "ADMNISTRADOR") {
+    return "ADMINISTRADOR";
+  }
+  return normalizedRole;
+}
+
+function isAdministratorRole(role) {
+  return normalizePermissionRoleName(role) === "ADMINISTRADOR";
+}
+
+function isPermissionsAdminRole(role) {
+  const normalizedRole = normalizePermissionRoleName(role);
+  return normalizedRole === "TI" || normalizedRole === "ADMINISTRADOR";
 }
 
 function isTiUser() {
@@ -6776,7 +7171,7 @@ function isTiUser() {
 }
 
 function isPermissionsAdmin() {
-  return ["TI", "ADMNISTRADOR", "ADMINISTRADOR"].includes(String(state.currentUser?.role || "").trim());
+  return isPermissionsAdminRole(state.currentUser?.role);
 }
 
 function getDefaultRolePermissions() {
@@ -6789,9 +7184,10 @@ function getDefaultRolePermissions() {
 
 function normalizeRolePermissions(permissions, roleName = "") {
   const permissionMap = new Map((permissions || []).map((item) => [item.module_key, item]));
-  const canAccessPermissionsModule = ["TI", "ADMNISTRADOR", "ADMINISTRADOR"].includes(String(roleName || "").trim().toUpperCase());
-  const canAccessVpsModule = String(roleName || "").trim().toUpperCase() === "TI";
-  const canEditDashboard = ["TI", "ADMNISTRADOR", "ADMINISTRADOR"].includes(String(roleName || "").trim().toUpperCase());
+  const normalizedRoleName = normalizePermissionRoleName(roleName);
+  const canAccessPermissionsModule = ["TI", "ADMINISTRADOR"].includes(normalizedRoleName);
+  const canAccessVpsModule = normalizedRoleName === "TI";
+  const canEditDashboard = ["TI", "ADMINISTRADOR"].includes(normalizedRoleName);
   return MODULES.map((module) => {
     const current = permissionMap.get(module.key) || {};
     const canEdit = module.key === "dashboard"
@@ -7229,9 +7625,11 @@ async function loadSalesDocumentSettingsFromServer() {
       state.salesDocumentSettings = normalizeSalesDocumentSettings(data);
       state.salesConfigTab = state.salesDocumentSettings.activeTab || state.salesConfigTab || "quote";
       saveSalesDocumentSettings();
-      renderApp();
     }
   } catch (error) {
+    if (isAuthenticationError(error)) {
+      throw error;
+    }
     console.error("sales settings load", error);
   }
 }
@@ -7279,7 +7677,7 @@ function normalizeSalesDocumentSettings(settings) {
 }
 
 function canManageSalesTemplates() {
-  return ["TI", "ADMNISTRADOR", "ADMINISTRADOR"].includes(String(state.currentUser?.role || "").trim());
+  return isPermissionsAdminRole(state.currentUser?.role);
 }
 
 function getSalesTemplate(type) {
@@ -7298,6 +7696,7 @@ function getSalesTemplatePlaceholderList(type) {
     "{{empresa_responsavel}}",
     "{{empresa_responsavel_cargo}}",
     "{{cliente_nome}}",
+    "{{cliente_cnpj}}",
     "{{cliente_documento}}",
     "{{cliente_endereco}}",
     "{{cliente_email}}",
@@ -7394,6 +7793,7 @@ function getSalesDocumentContext(type, sale) {
       "{{empresa_responsavel}}": company.responsible_name || sellerName,
       "{{empresa_responsavel_cargo}}": company.responsible_role || "Comercial",
       "{{cliente_nome}}": sale?.customer_name || customer?.name || "Cliente Exemplo",
+      "{{cliente_cnpj}}": sale?.cnpj || customer?.cnpj || "",
       "{{cliente_documento}}": sale?.cnpj || customer?.cnpj || customer?.cpf || "Documento nao informado",
       "{{cliente_endereco}}": sale?.address || customer?.address || "Endereco nao informado",
       "{{cliente_email}}": customer?.email || "cliente@empresa.com",
@@ -12104,14 +12504,32 @@ function bindPermissionEvents() {
     roleForm.addEventListener("submit", handlePermissionRoleSubmit);
   }
 
+  const syncPermissionRoleNameDraft = (value) => {
+    state.permissionRoleDraft.name = normalizePermissionRoleName(value);
+    state.permissionRoleDraft.permissions = normalizeRolePermissions(
+      state.permissionRoleDraft.permissions,
+      getPermissionRoleNormalizationName(state.permissionRoleDraft.name)
+    );
+  };
+
   const roleNameInput = document.querySelector('#permission-role-form input[name="name"]');
   if (roleNameInput) {
+    roleNameInput.addEventListener("input", (event) => {
+      const previousRoleName = state.permissionRoleDraft.name;
+      syncPermissionRoleNameDraft(event.currentTarget.value);
+      if (event.currentTarget.value !== state.permissionRoleDraft.name) {
+        event.currentTarget.value = state.permissionRoleDraft.name;
+      }
+      const previousPermissionsAdmin = ["TI", "ADMINISTRADOR"].includes(normalizePermissionRoleName(previousRoleName));
+      const nextPermissionsAdmin = ["TI", "ADMINISTRADOR"].includes(state.permissionRoleDraft.name);
+      const previousVpsAccess = normalizePermissionRoleName(previousRoleName) === "TI";
+      const nextVpsAccess = state.permissionRoleDraft.name === "TI";
+      if (previousPermissionsAdmin !== nextPermissionsAdmin || previousVpsAccess !== nextVpsAccess) {
+        renderActiveModule();
+      }
+    });
     roleNameInput.addEventListener("change", (event) => {
-      state.permissionRoleDraft.name = event.currentTarget.value.toUpperCase();
-      state.permissionRoleDraft.permissions = normalizeRolePermissions(
-        state.permissionRoleDraft.permissions,
-        getPermissionRoleNormalizationName(state.permissionRoleDraft.name)
-      );
+      syncPermissionRoleNameDraft(event.currentTarget.value);
       renderActiveModule();
     });
   }
@@ -12415,14 +12833,15 @@ async function handlePermissionRoleSubmit(event) {
   event.preventDefault();
   const form = event.currentTarget;
   const formData = new FormData(form);
+  const normalizedRoleName = normalizePermissionRoleName(formData.get("name")?.toString());
   const payload = {
     p_access_token: state.accessToken,
     p_role_id: formData.get("role_id") || null,
-    p_name: formData.get("name")?.toString().trim(),
+    p_name: normalizedRoleName,
     p_description: formData.get("description")?.toString().trim() || null,
     p_permissions: normalizeRolePermissions(
       state.permissionRoleDraft.permissions,
-      getPermissionRoleNormalizationName(formData.get("name")?.toString())
+      getPermissionRoleNormalizationName(normalizedRoleName)
     ),
   };
 
@@ -12454,12 +12873,13 @@ async function handleEmployeeSubmit(event) {
   const form = event.currentTarget;
   const formData = new FormData(form);
   const userId = formData.get("user_id")?.toString();
+  const passwordValue = formData.get("password")?.toString() || null;
   const payload = {
     p_access_token: state.accessToken,
     p_login_code: sanitizeLoginCode(formData.get("login_code")),
     p_full_name: formData.get("full_name")?.toString().trim(),
     p_email: formData.get("email")?.toString().trim() || null,
-    p_password: formData.get("password")?.toString() || null,
+    p_password: passwordValue,
     p_department: formData.get("department")?.toString().trim() || null,
     p_role: formData.get("department")?.toString().trim() || null,
     p_permission_role_id: formData.get("permission_role_id")?.toString() || null,
@@ -12467,13 +12887,27 @@ async function handleEmployeeSubmit(event) {
   };
 
   try {
-    const { error } = userId
-      ? await state.supabase.rpc("update_staff_user", {
+    if (userId) {
+      const updatePayload = {
         ...payload,
         p_user_id: userId,
-      })
-      : await state.supabase.rpc("create_staff_user", payload);
-    if (error) throw error;
+        p_password: isTiUser() ? null : payload.p_password,
+      };
+      const { error } = await state.supabase.rpc("update_staff_user", updatePayload);
+      if (error) throw error;
+
+      if (isTiUser() && passwordValue) {
+        const { error: resetError } = await state.supabase.rpc("reset_staff_user_password", {
+          p_access_token: state.accessToken,
+          p_user_id: userId,
+          p_password: passwordValue,
+        });
+        if (resetError) throw resetError;
+      }
+    } else {
+      const { error } = await state.supabase.rpc("create_staff_user", payload);
+      if (error) throw error;
+    }
 
     closeEmployeeModal();
     await loadPermissionsAdminData();
@@ -12708,8 +13142,343 @@ function sanitizeLoginCode(value) {
 }
 
 function formatError(error) {
+  if (handleAuthenticationFailure(error, { showMessage: false })) {
+    return AUTH_SESSION_INVALID_MESSAGE;
+  }
   return error?.message || "Ocorreu um erro inesperado.";
 }
+
+async function loadModuleData(moduleKey) {
+  return loadDataForModule(moduleKey);
+}
+
+function renderModuleFromLegacyBridge(moduleKey) {
+  switch (moduleKey) {
+    case "dashboard":
+      return renderDashboard();
+    case "products":
+      return renderProductsModule();
+    case "permissions":
+      return renderPermissionsModule();
+    case "vps":
+      return renderVpsControlModule();
+    case "audit":
+      return renderAuditModule();
+    case "bom":
+      return renderBomModule();
+    case "inventory":
+      return renderInventoryModule();
+    case "production":
+      return renderProductionModule();
+    case "service_orders":
+      return renderServiceOrdersModule();
+    case "machining":
+      return renderMachiningModule();
+    case "customers":
+      return renderCustomersModule();
+    case "sales":
+      return renderSalesModule();
+    case "purchases":
+      return renderPurchasesModule();
+    case "reports":
+      return renderReportsModule();
+    default:
+      return renderDashboard();
+  }
+}
+
+function bindModuleFromLegacyBridge(moduleKey) {
+  switch (moduleKey) {
+    case "dashboard":
+      bindDashboardEvents();
+      break;
+    case "products":
+      bindProductsModuleEvents();
+      break;
+    case "permissions":
+      bindPermissionEvents();
+      break;
+    case "vps":
+      bindVpsControlEvents();
+      break;
+    case "audit":
+      bindAuditModuleEvents();
+      break;
+    case "bom":
+      bindBomModuleEvents();
+      break;
+    case "inventory":
+      bindInventoryModuleEvents();
+      break;
+    case "production":
+      bindProductionModuleEvents();
+      break;
+    case "service_orders":
+      bindServiceOrdersModuleEvents();
+      break;
+    case "machining":
+      bindMachiningModuleEvents();
+      break;
+    case "customers":
+      bindCustomersModuleEvents();
+      break;
+    case "sales":
+      bindSalesModuleEvents();
+      break;
+    case "purchases":
+      bindPurchasesModuleEvents();
+      break;
+    case "reports":
+      bindReportsModuleEvents();
+      break;
+    default:
+      bindDashboardEvents();
+  }
+}
+
+window.CAPSFARMA_MODULE_BRIDGE = {
+  renderModule: renderModuleFromLegacyBridge,
+  bindModule: bindModuleFromLegacyBridge,
+  loadModuleData,
+  hasPermission: (moduleKey, permissionType) => hasPermission(moduleKey, permissionType),
+  getState: () => state,
+  helpers: {
+    // Core/shared formatting and shell helpers
+    escapeHtml,
+    formatShortId,
+    formatDate,
+    formatDateTime,
+    formatCurrency,
+    formatQuantity,
+    formatFileSize,
+    formatError,
+    noPermissionTemplate,
+    renderKpiCard,
+    renderStrategicKpiCard,
+    renderDashboardAlert,
+    renderDashboardPipelineStage,
+    renderDashboardBarChart,
+    buildDashboardSnapshot,
+    refreshDashboardData,
+    openSaleFromDashboard,
+    getDateShiftedIso,
+
+    // Products and inventory
+    productionPriorityCell,
+    renderProductForm,
+    renderProductMovementPanel,
+    productStatusCell,
+    productCategoryCell,
+    productStockCell,
+    renderLastMovementUserCell,
+    productActionCell,
+    getProductionMachiningOrders,
+    getProductionOrderMetadata,
+    getVisibleMachiningSteps,
+    getProductionStepActionLabel,
+    isProductionStepAdvanceDisabled,
+    renderProductionStageStatusBadge,
+    formatProcessMinutes,
+    renderOptions,
+    statusCell,
+    createEmptyProductionDraft,
+    handleProductionSubmit,
+    syncProductionDraftFromForm,
+    resetProductionFormState,
+    handleProductionProductSelection,
+    hydrateProductionDraft,
+    handleProductionStart,
+    handleMachiningStepAdvance,
+    handleMachiningStepOperatorChange,
+    getPurchaseRequestMetadata,
+    getLoggedUserName,
+    createEmptyPurchaseDraft,
+    createEmptyPurchaseItemDraft,
+    handlePurchaseSubmit,
+    handlePurchaseRequesterSelection,
+    syncPurchaseDraftFromForm,
+    resetPurchaseFormState,
+    hydratePurchaseDraft,
+    hydratePurchaseConclusionDraft,
+    updatePurchaseRequestStatus,
+    showPurchaseNotification,
+    resetPurchaseConclusionState,
+    notifyPurchaseRequester,
+    buildPurchaseRequesterMessage,
+    handlePurchaseConclusionSubmit,
+    syncPurchaseConclusionDraftFromForm,
+    handlePurchaseFileSelection,
+    removePurchaseFile,
+    handlePurchaseItemFieldChange,
+    purchaseUrgencyCell,
+    purchaseStatusCell,
+    renderInventoryMovementForm,
+    inventoryMovementTypeCell,
+    handleInventoryMovementSubmit,
+
+    // BOM
+    renderTable,
+    draftInputField,
+    draftTextAreaField,
+    draftSelectField,
+    deleteButtonCell,
+    bomStructureActionCell,
+    formatBomCategory,
+    materialStatusCell,
+    bomStructureStatusCell,
+    createEmptyBomDraftItem,
+    createEmptyBomStructureDraft,
+    buildBomComponentOptions,
+    getBomDraftItemComputed,
+    calculateBomDraftTotal,
+    getFileExtensionLabel,
+    resetBomStructureDraft,
+    hydrateBomDraftFromStructure,
+    renderBomStructureItemsSummary,
+    resetBomDraftItems,
+    removeBomAttachmentAt,
+    handleBomDraftItemFieldChange,
+    handleBomStructureDraftFieldChange,
+    handleBomMaterialSubmit,
+    handleBomStructureSubmit,
+    handleBomFileSelection,
+    loadBomData,
+
+    // Machining and production
+    createEmptyMachiningProcessDraft,
+    createEmptyMachiningDraft,
+    createEmptyMachiningStartDraft,
+    resequenceMachiningProcesses,
+    getMachiningDraftTotalMinutes,
+    formatMinutesLabel,
+    findMachiningPiece,
+    hydrateMachiningDraft,
+    syncMachiningDraftFromForm,
+    handleMachiningProcessFieldChange,
+    resetMachiningFormState,
+    handleMachiningSubmit,
+    syncMachiningStartDraftFromForm,
+    handleMachiningStartProductionSubmit,
+    getLatestMachiningOrder,
+    getMachiningCurrentStageLabel,
+    renderMachiningStatusBadge,
+    renderMachiningStepStatusBadge,
+    canStepAction,
+    handleMachiningStepStart,
+    handleMachiningStepComplete,
+    persistMachiningPieces,
+
+    // Audit and reports
+    loadAuditLogs,
+    getAuditKnownModules,
+    getModuleLabel,
+    createEmptyAuditFilters,
+    renderAuditLevelBadge,
+    getAuditLogActionOptions,
+    buildAuditExportHtml,
+    buildReportsSnapshot,
+    buildReportsExportHtml,
+    createEmptyReportsFilters,
+    loadAllVisibleData,
+
+    // Permissions and staff
+    createEmptyPermissionRoleDraft,
+    createEmptyEmployeeDraft,
+    isPermissionsAdmin,
+    isPermissionsAdminRole,
+    isTiUser,
+    formatStaffRole,
+    normalizePermissionRoleName,
+    normalizeRolePermissions,
+    getPermissionRoleNormalizationName,
+    renderEmployeeModal,
+    loadPermissionsAdminData,
+    closeEmployeeModal,
+    handlePermissionRoleSubmit,
+    handleEmployeeSubmit,
+    getModules: () => MODULES,
+
+    // VPS control
+    hasSupabaseConfig,
+    renderVpsHealthBadge,
+    formatVpsStatusLabel,
+    getMetricTone,
+    formatPercent,
+    loadVpsControlData,
+    loadVpsDatabaseTableDetail,
+    callVpsControlApi,
+    enqueueVpsAction,
+
+    // Shared form primitives
+    selectField,
+    inputField,
+    optionalInputField,
+    textAreaField,
+    optionalTextAreaField,
+    currencyInputField,
+
+    // Customers
+    createEmptyCustomerDraft,
+    handleCustomerSubmit,
+    syncCustomerDraftFromForm,
+    resetCustomerFormState,
+    hydrateCustomerDraft,
+    getCustomerMetadata,
+    formatCpf,
+    formatCnpj,
+    formatPhoneBr,
+
+    // Sales
+    canManageSalesTemplates,
+    createDefaultSalesTemplate,
+    createEmptySalesDraft,
+    createEmptySalesItemDraft,
+    createEmptySalesContractDraft,
+    getPaymentMethodLabel,
+    getSaleMetadata,
+    getSalesDraftTotals,
+    getSalesTemplate,
+    getSalesTemplatePlaceholderList,
+    resolveSalesTemplateContent,
+    openSalesDocumentPreview,
+    closeSalesDocumentPreview,
+    openPrintWindowForHtml,
+    openPreparedSalesDocumentShare,
+    handleSalesSubmit,
+    syncSalesDraftFromForm,
+    resetSalesFormState,
+    handleSalesCustomerSelection,
+    handleSalesItemFieldChange,
+    hydrateSalesDraft,
+    hydrateSalesContractDraft,
+    finalizeSaleRecord,
+    handleSalesContractSubmit,
+    syncSalesContractDraftFromForm,
+    resetSalesContractFormState,
+    syncSalesTemplateFromForm,
+    syncSalesCompanySettingsFromForm,
+    persistSalesDocumentSettings,
+    closeSalesConfigModal,
+    readFileAsDataUrl,
+    saleStatusCell,
+
+    // Runtime bridge/back-compat helpers
+    resetProductModuleState,
+    renderActiveModule,
+    renderModuleNav,
+    bindDeferredTextFilter,
+    bindDeferredSelectFilter,
+    handleProductSubmit,
+    resetProductForm,
+    populateForm,
+    bindCurrencyInputs,
+    isProductLinkedDeleteError,
+    loadTable,
+    queueSystemLog,
+    showToast,
+    handleProductMovementSubmit,
+  },
+};
 
 function isProductLinkedDeleteError(error) {
   const message = String(error?.message || "").toLowerCase();
