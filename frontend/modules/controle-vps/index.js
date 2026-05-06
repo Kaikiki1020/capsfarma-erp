@@ -1,7 +1,7 @@
 function getBridge() {
   const bridge = window.CAPSFARMA_MODULE_BRIDGE;
   if (!bridge) {
-    throw new Error("Bridge modular do ERP indisponivel.");
+    throw new Error("Bridge modular do ERP indisponível.");
   }
   return bridge;
 }
@@ -42,9 +42,9 @@ function renderVpsApplicationCard(app, helpers) {
         ${helpers.renderVpsHealthBadge(app.status)}
       </div>
       <p class="muted">Pasta: ${helpers.escapeHtml(app.project_path || "-")}</p>
-      <p class="muted">Ultima atualizacao: ${helpers.formatDateTime(app.last_updated_at)}</p>
+      <p class="muted">Última atualização: ${helpers.formatDateTime(app.last_updated_at)}</p>
       <div class="form-actions-row">
-        <button class="inline-button" type="button" data-vps-action="restart_application" data-vps-target-type="application" data-vps-target-name="${helpers.escapeHtml(app.app_name || "")}">Reiniciar Aplicacao</button>
+        <button class="inline-button" type="button" data-vps-action="restart_application" data-vps-target-type="application" data-vps-target-name="${helpers.escapeHtml(app.app_name || "")}">Reiniciar Aplicação</button>
       </div>
     </article>
   `;
@@ -75,7 +75,7 @@ export default {
     const helpers = bridge.helpers;
 
     if (!helpers.isTiUser()) {
-      return helpers.noPermissionTemplate("Acesso nao autorizado");
+      return helpers.noPermissionTemplate("Acesso não autorizado");
     }
 
     const summary = state.vpsControl.summary || {};
@@ -105,7 +105,7 @@ export default {
           <div>
             <p class="eyebrow muted">Infraestrutura restrita ao TI</p>
             <h3>Controle da VPS</h3>
-            <p class="muted">Monitoramento, acoes operacionais, logs, seguranca, backup, banco e auditoria em uma unica tela.</p>
+            <p class="muted">Monitoramento, ações operacionais, logs, segurança, backup, banco e auditoria em uma única tela.</p>
           </div>
           <div class="module-head-actions">
             <button class="ghost-button secondary-surface-button" type="button" data-vps-refresh>Atualizar painel</button>
@@ -114,34 +114,34 @@ export default {
         </div>
 
         <div class="summary-grid vps-summary-grid">
-          ${helpers.renderKpiCard({ label: "Supabase", value: supabaseConfigured ? "Conectado" : "Nao configurado", note: supabaseConfigured ? "Conexao principal do sistema ativa" : "Verifique supabase/config.js", icon: "SB", tone: supabaseConfigured ? "green" : "red" })}
+          ${helpers.renderKpiCard({ label: "Supabase", value: supabaseConfigured ? "Conectado" : "Não configurado", note: supabaseConfigured ? "Conexão principal do sistema ativa" : "Verifique supabase/config.js", icon: "SB", tone: supabaseConfigured ? "green" : "red" })}
           ${helpers.renderKpiCard({ label: "Status Geral", value: helpers.formatVpsStatusLabel(summary.server_status), note: "Saude consolidada da VPS", icon: "▣", tone: summary.server_status === "healthy" ? "green" : "red" })}
           ${helpers.renderKpiCard({ label: "CPU", value: `${helpers.formatPercent(summary.cpu_usage)}%`, note: "Uso atual do processador", icon: "CPU", tone: helpers.getMetricTone(summary.cpu_usage, 75, 90) })}
           ${helpers.renderKpiCard({ label: "Memoria", value: `${helpers.formatPercent(summary.memory_usage)}%`, note: "Consumo de RAM", icon: "RAM", tone: helpers.getMetricTone(summary.memory_usage, 75, 90) })}
-          ${helpers.renderKpiCard({ label: "Disco", value: `${helpers.formatPercent(summary.disk_usage)}%`, note: "Ocupacao do disco raiz", icon: "SSD", tone: helpers.getMetricTone(summary.disk_usage, 80, 92) })}
-          ${helpers.renderKpiCard({ label: "Uptime", value: helpers.escapeHtml(summary.uptime_label || "-"), note: "Tempo em operacao", icon: "UP", tone: "blue" })}
-          ${helpers.renderKpiCard({ label: "IP", value: helpers.escapeHtml(summary.server_ip || "-"), note: "Endereco principal", icon: "IP", tone: "blue" })}
+          ${helpers.renderKpiCard({ label: "Disco", value: `${helpers.formatPercent(summary.disk_usage)}%`, note: "Ocupação do disco raiz", icon: "SSD", tone: helpers.getMetricTone(summary.disk_usage, 80, 92) })}
+          ${helpers.renderKpiCard({ label: "Uptime", value: helpers.escapeHtml(summary.uptime_label || "-"), note: "Tempo em operação", icon: "UP", tone: "blue" })}
+          ${helpers.renderKpiCard({ label: "IP", value: helpers.escapeHtml(summary.server_ip || "-"), note: "Endereço principal", icon: "IP", tone: "blue" })}
           ${helpers.renderKpiCard({ label: "Sistema", value: helpers.escapeHtml(summary.operating_system || "-"), note: "Sistema operacional da VPS", icon: "OS", tone: "blue" })}
-          ${helpers.renderKpiCard({ label: "Ultima Atualizacao", value: helpers.formatDateTime(summary.updated_at), note: "Ultimo snapshot recebido", icon: "CLK", tone: "blue" })}
+          ${helpers.renderKpiCard({ label: "Última Atualização", value: helpers.formatDateTime(summary.updated_at), note: "Último snapshot recebido", icon: "CLK", tone: "blue" })}
         </div>
 
         <div class="vps-layout">
           <section class="table-card vps-card">
             <div class="dashboard-block-header">
               <div>
-                <h4>Status dos Servicos</h4>
-                <p class="muted">${onlineServices}/${services.length || 0} servicos principais online.</p>
+                <h4>Status dos Serviços</h4>
+                <p class="muted">${onlineServices}/${services.length || 0} serviços principais online.</p>
               </div>
             </div>
             <div class="vps-service-grid">
-              ${services.length ? services.map((service) => renderVpsServiceCard(service, helpers)).join("") : `<div class="empty-state">Nenhum servico monitorado.</div>`}
+              ${services.length ? services.map((service) => renderVpsServiceCard(service, helpers)).join("") : `<div class="empty-state">Nenhum serviço monitorado.</div>`}
             </div>
           </section>
 
           <section class="table-card vps-card">
             <div class="dashboard-block-header">
               <div>
-                <h4>Logs do Servidor e da Aplicacao</h4>
+                <h4>Logs do Servidor e da Aplicação</h4>
                 <p class="muted">${criticalLogs} ocorrencia(s) critica(s) na consulta atual.</p>
               </div>
             </div>
@@ -165,19 +165,19 @@ export default {
           <section class="table-card vps-card">
             <div class="dashboard-block-header">
               <div>
-                <h4>Aplicacoes Hospedadas</h4>
+                <h4>Aplicações Hospedadas</h4>
                 <p class="muted">ERP, API e outros projetos mapeados na VPS.</p>
               </div>
             </div>
             <div class="vps-application-grid">
-              ${applications.length ? applications.map((app) => renderVpsApplicationCard(app, helpers)).join("") : `<div class="empty-state">Nenhuma aplicacao cadastrada.</div>`}
+              ${applications.length ? applications.map((app) => renderVpsApplicationCard(app, helpers)).join("") : `<div class="empty-state">Nenhuma aplicação cadastrada.</div>`}
             </div>
           </section>
 
           <section class="table-card vps-card">
             <div class="dashboard-block-header">
               <div>
-                <h4>Seguranca da VPS</h4>
+                <h4>Segurança da VPS</h4>
                 <p class="muted">Firewall, portas, acessos recentes, IPs suspeitos e protecao SSH.</p>
               </div>
             </div>
@@ -196,8 +196,8 @@ export default {
                 <div class="permission-tag-list">${(security.suspicious_ips || []).length ? security.suspicious_ips.map((item) => `<span class="permission-tag danger-tag">${helpers.escapeHtml(item.ip || "-")}</span>`).join("") : `<span class="muted">Nenhum IP suspeito no snapshot.</span>`}</div>
               </article>
               <article class="card">
-                <strong>Usuarios SSH</strong>
-                <div class="permission-tag-list">${(security.ssh_users || []).length ? security.ssh_users.map((item) => `<span class="permission-tag">${helpers.escapeHtml(item.user || "-")}</span>`).join("") : `<span class="muted">Sem usuarios listados.</span>`}</div>
+                <strong>Usuários SSH</strong>
+                <div class="permission-tag-list">${(security.ssh_users || []).length ? security.ssh_users.map((item) => `<span class="permission-tag">${helpers.escapeHtml(item.user || "-")}</span>`).join("") : `<span class="muted">Sem usuários listados.</span>`}</div>
               </article>
             </div>
             <div class="vps-list-block">
@@ -210,7 +210,7 @@ export default {
             <div class="dashboard-block-header">
               <div>
                 <h4>Backups</h4>
-                <p class="muted">Historico, status atual e operacoes manuais com confirmacao.</p>
+                <p class="muted">Histórico, status atual e operações manuais com confirmação.</p>
               </div>
               <div class="module-head-actions">
                 <button class="ghost-button" type="button" data-vps-action="generate_backup" data-vps-target-type="backup" data-vps-target-name="database" data-vps-payload='{"scope":"database"}' data-vps-confirm="Gerar backup manual do banco agora?">Backup do Banco</button>
@@ -247,7 +247,7 @@ export default {
             <div class="dashboard-block-header">
               <div>
                 <h4>Banco de Dados</h4>
-                <p class="muted">Status operacional, ultimas referencias de backup, acoes do banco e inventario das tabelas.</p>
+                <p class="muted">Status operacional, últimas referências de backup, ações do banco e inventário das tabelas.</p>
               </div>
               <div class="module-head-actions">
                 <button class="ghost-button" type="button" data-vps-action="restart_database" data-vps-target-type="database" data-vps-target-name="${helpers.escapeHtml(database.engine || "database")}">Reiniciar Banco</button>
@@ -329,7 +329,7 @@ export default {
                               <tr>
                                 <td>${helpers.escapeHtml(column.column_name || "-")}</td>
                                 <td>${helpers.escapeHtml(column.data_type || "-")}</td>
-                                <td>${column.is_nullable ? "Sim" : "Nao"}</td>
+                                <td>${column.is_nullable ? "Sim" : "Não"}</td>
                                 <td>${helpers.escapeHtml(column.column_default || "-")}</td>
                               </tr>
                             `).join("") || `<tr><td colspan="4">Nenhuma coluna encontrada.</td></tr>`
@@ -388,16 +388,16 @@ export default {
             <div class="dashboard-block-header">
               <div>
                 <h4>Auditoria</h4>
-                <p class="muted">Historico de acoes executadas pelo TI nesta area.</p>
+                <p class="muted">Histórico de ações executadas pelo TI nesta área.</p>
               </div>
             </div>
             <div class="table-wrapper">
               <table>
                 <thead>
                   <tr>
-                    <th>Usuario</th>
-                    <th>Acao</th>
-                    <th>Servico</th>
+                    <th>Usuário</th>
+                    <th>Ação</th>
+                    <th>Serviço</th>
                     <th>IP</th>
                     <th>Data/Hora</th>
                   </tr>
@@ -411,7 +411,7 @@ export default {
                       <td>${helpers.escapeHtml(item.origin_ip || "-")}</td>
                       <td>${helpers.formatDateTime(item.created_at)}</td>
                     </tr>
-                  `).join("") : `<tr><td colspan="5">Nenhuma acao auditada.</td></tr>`}
+                  `).join("") : `<tr><td colspan="5">Nenhuma ação auditada.</td></tr>`}
                 </tbody>
               </table>
             </div>
@@ -431,7 +431,7 @@ export default {
         await helpers.enqueueVpsAction("refresh_snapshot", "server", "primary");
         await helpers.loadVpsControlData();
         helpers.renderActiveModule();
-        helpers.showToast("Atualizacao da VPS solicitada.", "success");
+        helpers.showToast("Atualização da VPS solicitada.", "success");
       } catch (error) {
         helpers.showToast(helpers.formatError(error), "danger");
       }
@@ -481,7 +481,7 @@ export default {
           await helpers.enqueueVpsAction(actionType, targetType, targetName, payload);
           await helpers.loadVpsControlData();
           helpers.renderActiveModule();
-          helpers.showToast("Acao enviada para a fila segura da VPS.", "success");
+          helpers.showToast("Ação enviada para a fila segura da VPS.", "success");
         } catch (error) {
           helpers.showToast(helpers.formatError(error), "danger");
         }

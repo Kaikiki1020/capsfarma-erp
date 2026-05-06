@@ -65,6 +65,8 @@ begin
 end;
 $$;
 
+drop function if exists public.generate_sale_number();
+
 create or replace function public.generate_sale_number(p_document_type text default 'sale')
 returns text
 language plpgsql
@@ -148,6 +150,7 @@ create table if not exists public.customers (
   name text not null,
   cnpj text not null,
   cpf text,
+  state_registration text,
   email text,
   phone text,
   contact text,
@@ -159,6 +162,7 @@ create table if not exists public.customers (
 );
 
 alter table public.customers add column if not exists cpf text;
+alter table public.customers add column if not exists state_registration text;
 alter table public.customers add column if not exists email text;
 alter table public.customers add column if not exists phone text;
 alter table public.customers add column if not exists contact text;
@@ -184,6 +188,7 @@ create table if not exists public.products (
   name text not null,
   status text not null default 'active' check (status in ('active', 'inactive')),
   category text not null,
+  product_type text not null default 'raw_material' check (product_type in ('raw_material', 'finished_product')),
   unit text not null,
   minimum_stock numeric(14,2) not null default 0,
   current_stock numeric(14,2) not null default 0,
@@ -195,6 +200,11 @@ create table if not exists public.products (
   expiration_date date,
   location text,
   description text,
+  photo_data_url text,
+  available_for_sale boolean not null default true,
+  sale_options jsonb not null default '[]'::jsonb,
+  has_production_sections boolean not null default false,
+  production_sections jsonb not null default '[]'::jsonb,
   last_moved_by_user_id uuid references public.app_users(id) on delete set null,
   last_moved_by_name text,
   last_movement_at timestamptz,
@@ -206,6 +216,9 @@ create table if not exists public.inventory_movements (
   product_id uuid not null references public.products(id) on delete restrict,
   product_name text not null,
   product_code text not null,
+  sale_option_id text,
+  sale_option_code text,
+  sale_option_label text,
   movement_type text not null check (movement_type in ('entry', 'exit', 'adjustment')),
   quantity numeric(14,2) not null,
   batch text,
@@ -219,9 +232,38 @@ create table if not exists public.inventory_movements (
 alter table public.products add column if not exists last_moved_by_user_id uuid references public.app_users(id) on delete set null;
 alter table public.products add column if not exists last_moved_by_name text;
 alter table public.products add column if not exists last_movement_at timestamptz;
+alter table public.products add column if not exists photo_data_url text;
+alter table public.products add column if not exists available_for_sale boolean not null default true;
+alter table public.products add column if not exists sale_options jsonb not null default '[]'::jsonb;
+alter table public.products add column if not exists has_production_sections boolean not null default false;
+alter table public.products add column if not exists production_sections jsonb not null default '[]'::jsonb;
+alter table public.products add column if not exists product_type text not null default 'raw_material';
+
+update public.products
+set
+  product_type = case
+    when lower(translate(coalesce(category, ''), 'áàãâäéèêëíìîïóòõôöúùûüçÁÀÃÂÄÉÈÊËÍÌÎÏÓÒÕÔÖÚÙÛÜÇ', 'aaaaaeeeeiiiiooooouuuucAAAAAEEEEIIIIOOOOOUUUUC')) in ('materia prima', 'raw_material') then 'raw_material'
+    when lower(translate(coalesce(category, ''), 'áàãâäéèêëíìîïóòõôöúùûüçÁÀÃÂÄÉÈÊËÍÌÎÏÓÒÕÔÖÚÙÛÜÇ', 'aaaaaeeeeiiiiooooouuuucAAAAAEEEEIIIIOOOOOUUUUC')) in ('produto acabado', 'finished_product', 'acabado') then 'finished_product'
+    when upper(coalesce(code, '')) like 'KIT%' then 'finished_product'
+    when upper(coalesce(code, '')) like 'CAPS05%' then 'finished_product'
+    when upper(coalesce(code, '')) like 'CAPS10%' then 'finished_product'
+    when upper(coalesce(category, '')) in ('KIT', 'CAPS05', 'CAPS10', 'BOMBAS', 'MISTURADORES', 'POLIDORAS', 'ENCAPSULADORAS') then 'finished_product'
+    else coalesce(nullif(product_type, ''), 'raw_material')
+  end,
+  category = 'general_products'
+where category is distinct from 'general_products'
+  or product_type is null
+  or product_type = ''
+  or product_type not in ('raw_material', 'finished_product');
+
+alter table public.products drop constraint if exists products_product_type_check;
+alter table public.products add constraint products_product_type_check check (product_type in ('raw_material', 'finished_product'));
 
 alter table public.inventory_movements add column if not exists moved_by_user_id uuid references public.app_users(id) on delete set null;
 alter table public.inventory_movements add column if not exists moved_by_name text;
+alter table public.inventory_movements add column if not exists sale_option_id text;
+alter table public.inventory_movements add column if not exists sale_option_code text;
+alter table public.inventory_movements add column if not exists sale_option_label text;
 
 create table if not exists public.bom_materials (
   id uuid primary key default gen_random_uuid(),
@@ -241,9 +283,14 @@ create table if not exists public.bom_materials (
 create table if not exists public.bom_structures (
   id uuid primary key default gen_random_uuid(),
   code text not null,
+  category text not null default 'general',
   product_id uuid references public.products(id) on delete restrict,
+  bom_structure_id uuid references public.bom_structures(id) on delete set null,
   product_code text,
   product_name text,
+  sale_option_id text,
+  sale_option_code text,
+  sale_option_label text,
   name text not null,
   version text not null,
   batch_size numeric(14,2) not null default 1,
@@ -262,9 +309,13 @@ create table if not exists public.bom_structures (
   unique (code, version)
 );
 
+alter table public.bom_structures add column if not exists category text not null default 'general';
 alter table public.bom_structures add column if not exists product_id uuid references public.products(id) on delete restrict;
 alter table public.bom_structures add column if not exists product_code text;
 alter table public.bom_structures add column if not exists product_name text;
+alter table public.bom_structures add column if not exists sale_option_id text;
+alter table public.bom_structures add column if not exists sale_option_code text;
+alter table public.bom_structures add column if not exists sale_option_label text;
 alter table public.bom_structures add column if not exists height numeric(14,2);
 alter table public.bom_structures add column if not exists width numeric(14,2);
 alter table public.bom_structures add column if not exists length numeric(14,2);
@@ -301,6 +352,24 @@ create table if not exists public.production_orders (
   sale_number text,
   customer_name text,
   origin text,
+  delivery_days text,
+  bom_structure_id uuid references public.bom_structures(id) on delete set null,
+  production_items jsonb not null default '[]'::jsonb,
+  operation_steps jsonb not null default '[]'::jsonb,
+  timeline_entries jsonb not null default '[]'::jsonb,
+  attachments jsonb not null default '[]'::jsonb,
+  material_plan jsonb not null default '[]'::jsonb,
+  quality_logs jsonb not null default '[]'::jsonb,
+  alerts jsonb not null default '[]'::jsonb,
+  current_step_index integer not null default 0,
+  produced_quantity numeric(14,2) not null default 0,
+  defective_quantity numeric(14,2) not null default 0,
+  rework_quantity numeric(14,2) not null default 0,
+  estimated_minutes integer not null default 0,
+  active_operator text,
+  started_at timestamptz,
+  paused_at timestamptz,
+  completed_at timestamptz,
   notes text,
   created_at timestamptz not null default now()
 );
@@ -376,7 +445,54 @@ create table if not exists public.service_orders (
   updated_at timestamptz not null default timezone('utc', now())
 );
 
+alter table public.service_orders add column if not exists checklist_data jsonb not null default '{}'::jsonb;
+alter table public.service_orders add column if not exists checklist_finalized boolean not null default false;
+alter table public.service_orders add column if not exists checklist_finalized_at timestamptz;
+alter table public.service_orders add column if not exists checklist_finalized_by_name text;
+
+create table if not exists public.service_order_checklists (
+  id uuid primary key default gen_random_uuid(),
+  checklist_number text not null unique,
+  service_order_id uuid references public.service_orders(id) on delete set null,
+  service_order_number text,
+  customer_id uuid references public.customers(id) on delete set null,
+  customer_name text not null,
+  customer_document text,
+  customer_phone text,
+  customer_email text,
+  customer_location text not null,
+  service_date date not null default current_date,
+  equipment_type text not null,
+  service_type text not null,
+  machine_serial text not null,
+  checklist_groups jsonb not null default '{}'::jsonb,
+  general_observations text,
+  caps_responsible_name text not null,
+  caps_responsible_cpf text,
+  caps_signature text,
+  customer_responsible_name text,
+  customer_responsible_document text,
+  customer_signature text,
+  status text not null default 'draft' check (status in ('draft', 'finalized')),
+  finalized boolean not null default false,
+  finalized_at timestamptz,
+  finalized_by_user_id uuid references public.app_users(id) on delete set null,
+  finalized_by_name text,
+  created_by_user_id uuid references public.app_users(id) on delete set null,
+  created_by_name text,
+  updated_by_user_id uuid references public.app_users(id) on delete set null,
+  updated_by_name text,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
+create index if not exists service_order_checklists_service_date_idx on public.service_order_checklists (service_date);
+create index if not exists service_order_checklists_customer_idx on public.service_order_checklists (customer_id);
+create index if not exists service_order_checklists_equipment_idx on public.service_order_checklists (equipment_type);
+create index if not exists service_order_checklists_status_idx on public.service_order_checklists (status);
+
 alter table public.production_orders add column if not exists product_id uuid references public.products(id) on delete restrict;
+alter table public.production_orders add column if not exists bom_structure_id uuid references public.bom_structures(id) on delete set null;
 alter table public.production_orders add column if not exists product_code text;
 alter table public.production_orders add column if not exists priority text not null default 'media';
 alter table public.production_orders add column if not exists lot_number text;
@@ -385,6 +501,45 @@ alter table public.production_orders add column if not exists sale_id uuid;
 alter table public.production_orders add column if not exists sale_number text;
 alter table public.production_orders add column if not exists customer_name text;
 alter table public.production_orders add column if not exists origin text;
+alter table public.production_orders add column if not exists delivery_days text;
+alter table public.production_orders add column if not exists production_items jsonb not null default '[]'::jsonb;
+alter table public.production_orders add column if not exists operation_steps jsonb not null default '[]'::jsonb;
+alter table public.production_orders add column if not exists timeline_entries jsonb not null default '[]'::jsonb;
+alter table public.production_orders add column if not exists attachments jsonb not null default '[]'::jsonb;
+alter table public.production_orders add column if not exists material_plan jsonb not null default '[]'::jsonb;
+alter table public.production_orders add column if not exists quality_logs jsonb not null default '[]'::jsonb;
+alter table public.production_orders add column if not exists alerts jsonb not null default '[]'::jsonb;
+alter table public.production_orders add column if not exists current_step_index integer not null default 0;
+alter table public.production_orders add column if not exists produced_quantity numeric(14,2) not null default 0;
+alter table public.production_orders add column if not exists defective_quantity numeric(14,2) not null default 0;
+alter table public.production_orders add column if not exists rework_quantity numeric(14,2) not null default 0;
+alter table public.production_orders add column if not exists estimated_minutes integer not null default 0;
+alter table public.production_orders add column if not exists active_operator text;
+alter table public.production_orders add column if not exists started_at timestamptz;
+alter table public.production_orders add column if not exists paused_at timestamptz;
+alter table public.production_orders add column if not exists completed_at timestamptz;
+
+do $$
+begin
+  if exists (
+    select 1
+    from pg_constraint
+    where conname = 'production_orders_status_check'
+      and conrelid = 'public.production_orders'::regclass
+  ) then
+    alter table public.production_orders drop constraint production_orders_status_check;
+  end if;
+exception
+  when undefined_table then null;
+end $$;
+
+alter table public.production_orders
+  add constraint production_orders_status_check
+  check (status in ('planned', 'in_progress', 'paused', 'completed', 'cancelled'));
+
+create index if not exists production_orders_sale_id_idx on public.production_orders (sale_id);
+create index if not exists production_orders_status_idx on public.production_orders (status);
+create index if not exists production_orders_planned_end_idx on public.production_orders (planned_end);
 
 create table if not exists public.purchase_requests (
   id uuid primary key default gen_random_uuid(),
@@ -470,6 +625,303 @@ alter table public.purchase_requests
   add constraint purchase_requests_status_check
   check (status in ('pending', 'in_analysis', 'approved', 'in_purchase', 'purchase_completed', 'completed', 'cancelled', 'rejected'));
 
+create table if not exists public.accounts_payable (
+  id uuid primary key default gen_random_uuid(),
+  payable_number text unique,
+  description text not null,
+  supplier text not null,
+  category text not null check (category in ('Energia', 'Materia-prima', 'Manutencao', 'Impostos', 'Servicos', 'Internet', 'Aluguel', 'Compras', 'Producao', 'Outros')),
+  amount numeric(14,2) not null default 0,
+  due_date date not null,
+  paid_at timestamptz,
+  payment_method text check (payment_method in ('pix', 'boleto', 'cartao', 'transferencia')),
+  status text not null default 'pending' check (status in ('pending', 'paid', 'overdue', 'cancelled')),
+  account_type text not null default 'variable' check (account_type in ('fixed', 'variable')),
+  frequency text check (frequency in ('weekly', 'monthly', 'quarterly', 'semiannual', 'annual')),
+  auto_generate boolean not null default false,
+  purchase_request_id uuid references public.purchase_requests(id) on delete set null,
+  purchase_request_number text,
+  purchase_installment_number integer,
+  purchase_installment_label text,
+  source_module text,
+  generated_from_payable_id uuid references public.accounts_payable(id) on delete set null,
+  attachments jsonb not null default '[]'::jsonb,
+  payment_log jsonb not null default '[]'::jsonb,
+  notes text,
+  created_by_user_id uuid references public.app_users(id) on delete set null,
+  created_by_name text,
+  updated_by_user_id uuid references public.app_users(id) on delete set null,
+  updated_by_name text,
+  paid_by_user_id uuid references public.app_users(id) on delete set null,
+  paid_by_name text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.accounts_payable add column if not exists purchase_installment_number integer;
+alter table public.accounts_payable add column if not exists purchase_installment_label text;
+
+alter table public.accounts_payable
+  drop constraint if exists accounts_payable_purchase_request_unique;
+
+drop index if exists public.accounts_payable_purchase_request_unique_idx;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'accounts_payable_purchase_request_installment_unique'
+      and conrelid = 'public.accounts_payable'::regclass
+  ) then
+    alter table public.accounts_payable
+      add constraint accounts_payable_purchase_request_installment_unique unique (purchase_request_id, purchase_installment_number);
+  end if;
+exception
+  when undefined_table then null;
+end $$;
+
+create index if not exists accounts_payable_due_date_idx on public.accounts_payable (due_date);
+create index if not exists accounts_payable_status_idx on public.accounts_payable (status);
+create index if not exists accounts_payable_supplier_idx on public.accounts_payable (supplier);
+create index if not exists accounts_payable_category_idx on public.accounts_payable (category);
+
+insert into storage.buckets (id, name, public)
+values ('purchase-quotes', 'purchase-quotes', true)
+on conflict (id) do nothing;
+
+drop policy if exists "Public read purchase quotes" on storage.objects;
+create policy "Public read purchase quotes"
+on storage.objects
+for select
+using (bucket_id = 'purchase-quotes');
+
+drop policy if exists "Public insert purchase quotes" on storage.objects;
+create policy "Public insert purchase quotes"
+on storage.objects
+for insert
+with check (bucket_id = 'purchase-quotes');
+
+drop policy if exists "Public update purchase quotes" on storage.objects;
+create policy "Public update purchase quotes"
+on storage.objects
+for update
+using (bucket_id = 'purchase-quotes')
+with check (bucket_id = 'purchase-quotes');
+
+create or replace function public.map_purchase_department_to_payable_category(p_department text)
+returns text
+language plpgsql
+immutable
+as $$
+declare
+  normalized_department text := lower(coalesce(p_department, ''));
+begin
+  if normalized_department like '%manut%' then
+    return 'Manutencao';
+  elsif normalized_department like '%produc%' then
+    return 'Producao';
+  elsif normalized_department like '%energ%' then
+    return 'Energia';
+  elsif normalized_department like '%impost%' then
+    return 'Impostos';
+  elsif normalized_department like '%serv%' then
+    return 'Servicos';
+  else
+    return 'Compras';
+  end if;
+end;
+$$;
+
+create or replace function public.normalize_purchase_payable_method(p_payment_method text)
+returns text
+language plpgsql
+immutable
+as $$
+declare
+  normalized_method text := lower(coalesce(trim(p_payment_method), ''));
+begin
+  if normalized_method like '%pix%' then
+    return 'pix';
+  elsif normalized_method like '%boleto%' or normalized_method like '%nota%' then
+    return 'boleto';
+  elsif normalized_method like '%cart%' then
+    return 'cartao';
+  elsif normalized_method like '%transf%' then
+    return 'transferencia';
+  end if;
+
+  return null;
+end;
+$$;
+
+create or replace function public.sync_payable_from_purchase_request()
+returns trigger
+language plpgsql
+as $$
+declare
+  payment_details jsonb := coalesce(new.purchase_details, '{}'::jsonb);
+  raw_payment_method text := payment_details ->> 'payment_method';
+  normalized_payment_method text := public.normalize_purchase_payable_method(raw_payment_method);
+  should_generate boolean := new.status = 'completed'
+    and (lower(coalesce(raw_payment_method, '')) like '%boleto%' or lower(coalesce(raw_payment_method, '')) like '%nota%');
+  payable_description text;
+  payable_supplier text;
+  installment_item jsonb;
+  installments jsonb := coalesce(payment_details -> 'installments', '[]'::jsonb);
+  installment_index integer := 0;
+  installment_amount numeric(14,2);
+  installment_due_date date;
+  installment_attachments jsonb;
+  installment_count integer := 0;
+begin
+  if not should_generate then
+    return new;
+  end if;
+
+  payable_description := coalesce(
+    case
+      when jsonb_typeof(new.request_items) = 'array' and jsonb_array_length(new.request_items) > 0
+        then concat('Compra ', coalesce(new.request_items -> 0 ->> 'product_name', new.item_name, new.request_number, 'Conta a pagar'))
+      else null
+    end,
+    concat('Compra ', coalesce(new.item_name, new.request_number, new.id::text))
+  );
+  payable_supplier := coalesce(nullif(payment_details ->> 'supplier', ''), new.requester_name, 'Fornecedor nao informado');
+
+  if jsonb_typeof(installments) = 'array' then
+    installment_count := jsonb_array_length(installments);
+  end if;
+
+  if installment_count = 0 then
+    installments := jsonb_build_array(jsonb_build_object(
+      'installment_number', 1,
+      'due_date', coalesce(payment_details ->> 'due_date', payment_details ->> 'purchase_date', new.needed_by::text, current_date::text),
+      'amount', coalesce(nullif(payment_details ->> 'total_amount', '')::numeric, new.estimated_total, 0),
+      'boleto_files', coalesce(payment_details -> 'boleto_files', '[]'::jsonb)
+    ));
+    installment_count := 1;
+  end if;
+
+  for installment_item in
+    select value
+    from jsonb_array_elements(installments)
+  loop
+    installment_index := coalesce(nullif(installment_item ->> 'installment_number', '')::integer, installment_index + 1);
+    installment_amount := coalesce(nullif(installment_item ->> 'amount', '')::numeric, 0);
+    installment_due_date := coalesce(
+      nullif(installment_item ->> 'due_date', '')::date,
+      nullif(payment_details ->> 'due_date', '')::date,
+      nullif(payment_details ->> 'purchase_date', '')::date,
+      new.needed_by,
+      current_date
+    );
+    installment_attachments := coalesce(installment_item -> 'boleto_files', '[]'::jsonb)
+      || coalesce(payment_details -> 'invoice_files', '[]'::jsonb)
+      || coalesce(payment_details -> 'order_files', '[]'::jsonb)
+      || coalesce(payment_details -> 'attachment_files', '[]'::jsonb);
+
+    insert into public.accounts_payable (
+      payable_number,
+      description,
+      supplier,
+      category,
+      amount,
+      due_date,
+      payment_method,
+      status,
+      account_type,
+      auto_generate,
+      purchase_request_id,
+      purchase_request_number,
+      purchase_installment_number,
+      purchase_installment_label,
+      source_module,
+      attachments,
+      payment_log,
+      notes,
+      created_by_user_id,
+      created_by_name,
+      updated_by_user_id,
+      updated_by_name
+    )
+    values (
+      'CP-AUTO-' || coalesce(new.request_number, replace(new.id::text, '-', '')) || '-P' || lpad(installment_index::text, 2, '0'),
+      case
+        when installment_count > 1 then payable_description || ' - Parcela ' || installment_index
+        else payable_description
+      end,
+      payable_supplier,
+      public.map_purchase_department_to_payable_category(new.department),
+      installment_amount,
+      installment_due_date,
+      coalesce(normalized_payment_method, 'boleto'),
+      'pending',
+      'variable',
+      false,
+      new.id,
+      new.request_number,
+      installment_index,
+      case
+        when installment_count > 1 then 'Parcela ' || installment_index || '/' || installment_count
+        else 'Parcela unica'
+      end,
+      'purchases',
+      installment_attachments,
+      '[]'::jsonb,
+      payment_details ->> 'purchase_notes',
+      new.requester_id,
+      new.requester_name,
+      new.requester_id,
+      new.requester_name
+    )
+    on conflict (purchase_request_id, purchase_installment_number) do update
+      set description = excluded.description,
+          supplier = excluded.supplier,
+          category = excluded.category,
+          amount = excluded.amount,
+          due_date = excluded.due_date,
+          payment_method = excluded.payment_method,
+          purchase_installment_label = excluded.purchase_installment_label,
+          source_module = excluded.source_module,
+          attachments = excluded.attachments,
+          notes = excluded.notes,
+          updated_by_user_id = excluded.updated_by_user_id,
+          updated_by_name = excluded.updated_by_name,
+          updated_at = now();
+  end loop;
+
+  delete from public.accounts_payable
+  where purchase_request_id = new.id
+    and source_module = 'purchases'
+    and coalesce(purchase_installment_number, 1) > installment_count;
+
+  return new;
+end;
+$$;
+
+create or replace function public.prevent_duplicate_accounts_payable_payment()
+returns trigger
+language plpgsql
+as $$
+begin
+  if old.status = 'paid'
+    and new.status = 'paid'
+    and (
+      new.paid_at is distinct from old.paid_at
+      or coalesce(new.payment_method, '') is distinct from coalesce(old.payment_method, '')
+      or coalesce(new.paid_by_user_id, '00000000-0000-0000-0000-000000000000'::uuid) is distinct from coalesce(old.paid_by_user_id, '00000000-0000-0000-0000-000000000000'::uuid)
+      or coalesce(new.paid_by_name, '') is distinct from coalesce(old.paid_by_name, '')
+      or coalesce(new.payment_log, '[]'::jsonb) is distinct from coalesce(old.payment_log, '[]'::jsonb)
+    )
+  then
+    raise exception 'Pagamento duplicado bloqueado para a conta %.', coalesce(old.payable_number, old.id::text);
+  end if;
+
+  return new;
+end;
+$$;
+
 create table if not exists public.sales (
   id uuid primary key default gen_random_uuid(),
   sale_document_type text not null default 'quote',
@@ -515,6 +967,9 @@ alter table public.sales add column if not exists discount_amount numeric(14,2) 
 alter table public.sales add column if not exists total_amount numeric(14,2) not null default 0;
 alter table public.sales add column if not exists production_generated boolean not null default false;
 alter table public.sales add column if not exists production_order_ids jsonb not null default '[]'::jsonb;
+alter table public.sales add column if not exists priority text not null default 'media';
+alter table public.sales add column if not exists delivery_days text;
+alter table public.sales alter column sale_number drop default;
 alter table public.sales alter column contract_number drop not null;
 alter table public.sales alter column contract_number drop default;
 
@@ -621,6 +1076,7 @@ declare
     'customers',
     'sales',
     'purchases',
+    'payables',
     'permissions'
   ];
 begin
@@ -715,7 +1171,9 @@ alter table public.bom_items enable row level security;
 alter table public.production_orders enable row level security;
 alter table public.logs_sistema enable row level security;
 alter table public.service_orders enable row level security;
+alter table public.service_order_checklists enable row level security;
 alter table public.purchase_requests enable row level security;
+alter table public.accounts_payable enable row level security;
 alter table public.sales enable row level security;
 
 drop policy if exists "Allow app read users" on public.app_users;
@@ -732,7 +1190,9 @@ drop policy if exists "Allow app write bom" on public.bom_items;
 drop policy if exists "Allow app write production" on public.production_orders;
 drop policy if exists "Allow app write audit logs" on public.logs_sistema;
 drop policy if exists "Allow app write service_orders" on public.service_orders;
+drop policy if exists "Allow app write service_order_checklists" on public.service_order_checklists;
 drop policy if exists "Allow app write purchase_requests" on public.purchase_requests;
+drop policy if exists "Allow app write accounts_payable" on public.accounts_payable;
 drop policy if exists "Allow app write sales" on public.sales;
 
 create policy "Allow app read users" on public.app_users
@@ -777,11 +1237,30 @@ for all using (true) with check (true);
 create policy "Allow app write service_orders" on public.service_orders
 for all using (true) with check (true);
 
+create policy "Allow app write service_order_checklists" on public.service_order_checklists
+for all using (true) with check (true);
+
 create policy "Allow app write purchase_requests" on public.purchase_requests
+for all using (true) with check (true);
+
+create policy "Allow app write accounts_payable" on public.accounts_payable
 for all using (true) with check (true);
 
 create policy "Allow app write sales" on public.sales
 for all using (true) with check (true);
+
+drop trigger if exists purchase_requests_sync_payable_trigger on public.purchase_requests;
+create trigger purchase_requests_sync_payable_trigger
+after insert or update of status, purchase_details, request_items, department, item_name, requester_name, requester_id, request_number, estimated_total, needed_by
+on public.purchase_requests
+for each row
+execute function public.sync_payable_from_purchase_request();
+
+drop trigger if exists accounts_payable_prevent_duplicate_payment_trigger on public.accounts_payable;
+create trigger accounts_payable_prevent_duplicate_payment_trigger
+before update on public.accounts_payable
+for each row
+execute function public.prevent_duplicate_accounts_payable_payment();
 
 alter table public.app_users drop constraint if exists app_users_role_check;
 alter table public.app_users alter column role drop default;
@@ -1067,6 +1546,49 @@ begin
 end;
 $$;
 
+create or replace function public.get_production_operation_settings(p_access_token text)
+returns jsonb
+language plpgsql
+security definer
+stable
+as $$
+declare
+  settings_text text;
+begin
+  perform public.get_session_user_from_token(p_access_token);
+
+  select setting_value
+    into settings_text
+  from public.app_private_settings
+  where setting_key = 'production_operation_settings';
+
+  return coalesce(settings_text::jsonb, '[]'::jsonb);
+exception
+  when invalid_text_representation then
+    return '[]'::jsonb;
+end;
+$$;
+
+create or replace function public.save_production_operation_settings(
+  p_access_token text,
+  p_settings jsonb
+)
+returns jsonb
+language plpgsql
+security definer
+as $$
+begin
+  perform public.require_permissions_admin(p_access_token);
+
+  insert into public.app_private_settings (setting_key, setting_value)
+  values ('production_operation_settings', coalesce(p_settings, '[]'::jsonb)::text)
+  on conflict (setting_key) do update
+    set setting_value = excluded.setting_value;
+
+  return coalesce(p_settings, '[]'::jsonb);
+end;
+$$;
+
 create or replace function public.seed_permission_role_modules(
   p_permission_role_id uuid,
   p_allow_permissions_module boolean,
@@ -1089,6 +1611,7 @@ declare
     'customers',
     'sales',
     'purchases',
+    'payables',
     'permissions',
     'vps'
   ];
@@ -1670,6 +2193,12 @@ create table if not exists public.vps_security_snapshots (
   alerts jsonb not null default '[]'::jsonb,
   updated_at timestamptz not null default now()
 );
+
+create index if not exists vps_snapshots_updated_at_idx
+  on public.vps_snapshots (updated_at desc);
+
+create index if not exists vps_security_snapshots_updated_at_idx
+  on public.vps_security_snapshots (updated_at desc);
 
 create table if not exists public.vps_backups (
   id uuid primary key default gen_random_uuid(),

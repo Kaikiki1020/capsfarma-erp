@@ -1,7 +1,7 @@
 function getBridge() {
   const bridge = window.CAPSFARMA_MODULE_BRIDGE;
   if (!bridge) {
-    throw new Error("Bridge modular do ERP indisponivel.");
+    throw new Error("Bridge modular do ERP indisponível.");
   }
   return bridge;
 }
@@ -27,8 +27,8 @@ function renderPermissionRolePermissionGrid(roleDraft, helpers) {
               : permission.module_key === "vps"
                 ? "Restrito exclusivamente ao perfil TI"
                 : permission.module_key === "dashboard" && lockedDashboardEdit
-                  ? "Perfis operacionais podem visualizar, mas nao editar o dashboard"
-                  : "Controle de leitura e alteracao"
+                  ? "Perfis operacionais podem visualizar, mas não editar o dashboard"
+                  : "Controle de leitura e alteração"
           }</p>
         </div>
         <label class="permission-switch">
@@ -58,12 +58,12 @@ function renderPermissionRoleCard(role, helpers) {
       <div class="permission-role-card-head">
         <div>
           <h4>${helpers.escapeHtml(role.name)}</h4>
-          <p class="muted">${helpers.escapeHtml(role.description || "Sem descricao cadastrada.")}</p>
+          <p class="muted">${helpers.escapeHtml(role.description || "Sem descrição cadastrada.")}</p>
         </div>
         ${role.is_system ? `<span class="status-chip chip-blue">Sistema</span>` : ""}
       </div>
       <div class="permission-tag-list">
-        ${activeTags || `<span class="muted">Nenhuma permissao marcada.</span>`}
+        ${activeTags || `<span class="muted">Nenhuma permissão marcada.</span>`}
       </div>
       <div class="form-actions-row">
         <button class="inline-button" type="button" data-edit-permission-role="${role.id}">Editar</button>
@@ -78,7 +78,7 @@ function renderPermissionUserRow(user, helpers) {
     <tr>
       <td>
         <strong>${helpers.escapeHtml(user.full_name)}</strong>
-        <div class="table-inline-copy muted">${helpers.escapeHtml(user.permission_role_name || "Sem papel de permissao")}</div>
+        <div class="table-inline-copy muted">${helpers.escapeHtml(user.permission_role_name || "Sem papel de permissão")}</div>
       </td>
       <td>${helpers.escapeHtml(user.login_code || "-")}</td>
       <td>${helpers.escapeHtml(user.email || "-")}</td>
@@ -117,7 +117,7 @@ export default {
     const helpers = bridge.helpers;
 
     if (!helpers.isPermissionsAdmin()) {
-      return helpers.noPermissionTemplate("Voce nao tem permissao para acessar esta area.");
+      return helpers.noPermissionTemplate("Você não tem permissão para acessar esta área.");
     }
 
     const users = state.moduleData.users || [];
@@ -131,21 +131,21 @@ export default {
       <section class="module-panel permissions-module">
         <div class="module-head permissions-hero-head">
           <div>
-            <p class="eyebrow muted">Seguranca e governanca</p>
-            <h3>Gerenciamento de Permissoes</h3>
-            <p class="muted">Configure papeis, permissoes e funcionarios</p>
+            <p class="eyebrow muted">Segurança e governanca</p>
+            <h3>Gerenciamento de Permissões</h3>
+            <p class="muted">Configure papeis, permissões e funcionários</p>
           </div>
           <div class="module-head-actions">
-            <button class="secondary-button" type="button" data-open-employee-modal>Cadastrar Funcionario</button>
+            <button class="secondary-button" type="button" data-open-employee-modal>Cadastrar Funcionário</button>
             <button class="primary-button" type="button" data-new-permission-role>+ Novo Papel</button>
           </div>
         </div>
 
         <div class="summary-grid permissions-summary-grid">
-          ${helpers.renderKpiCard({ label: "Papeis de Permissao", value: roles.length, note: "Perfis ativos no ERP", icon: "◩", tone: "blue" })}
-          ${helpers.renderKpiCard({ label: "Funcionarios Ativos", value: activeUsers, note: "Usuarios habilitados para operar", icon: "◎", tone: "green" })}
-          ${helpers.renderKpiCard({ label: "Acessos Criticos", value: criticalUsers, note: "TI e ADMINISTRADOR", icon: "◪", tone: "amber" })}
-          ${helpers.renderKpiCard({ label: "Funcionarios Inativos", value: inactiveUsers, note: inactiveUsers ? "Usuarios desativados no cadastro" : "Nenhum registro inativo", icon: "◫", tone: "red" })}
+          ${helpers.renderKpiCard({ label: "Papeis de Permissão", value: roles.length, note: "Perfis ativos no ERP", icon: "◩", tone: "blue" })}
+          ${helpers.renderKpiCard({ label: "Funcionários Ativos", value: activeUsers, note: "Usuários habilitados para operar", icon: "◎", tone: "green" })}
+          ${helpers.renderKpiCard({ label: "Acessos Críticos", value: criticalUsers, note: "TI e ADMINISTRADOR", icon: "◪", tone: "amber" })}
+          ${helpers.renderKpiCard({ label: "Funcionários Inativos", value: inactiveUsers, note: inactiveUsers ? "Usuários desativados no cadastro" : "Nenhum registro inativo", icon: "◫", tone: "red" })}
         </div>
 
         <div class="permissions-layout">
@@ -156,7 +156,7 @@ export default {
                   <div class="module-head compact-head">
                     <div>
                       <p class="eyebrow muted">Cadastro de papel</p>
-                      <h3>${state.permissionRoleDraft.id ? "Editar Papel de Permissao" : "Novo Papel de Permissao"}</h3>
+                      <h3>${state.permissionRoleDraft.id ? "Editar Papel de Permissão" : "Novo Papel de Permissão"}</h3>
                     </div>
                   </div>
                   <form id="permission-role-form" class="permissions-role-form">
@@ -166,7 +166,7 @@ export default {
                       <input type="text" name="name" value="${helpers.escapeHtml(state.permissionRoleDraft.name)}" placeholder="Ex.: VENDEDOR" required />
                     </label>
                     <label>
-                      Descricao
+                      Descrição
                       <textarea name="description" placeholder="Resumo do papel e do escopo operacional.">${helpers.escapeHtml(state.permissionRoleDraft.description || "")}</textarea>
                     </label>
                     <div class="permission-module-grid">
@@ -199,7 +199,7 @@ export default {
           <div class="module-head compact-head">
             <div>
               <p class="eyebrow muted">Equipe</p>
-              <h3>Funcionarios Cadastrados</h3>
+              <h3>Funcionários Cadastrados</h3>
             </div>
           </div>
           ${
@@ -209,8 +209,8 @@ export default {
                   <table>
                     <thead>
                       <tr>
-                        <th>Funcionario</th>
-                        <th>Codigo</th>
+                        <th>Funcionário</th>
+                        <th>Código</th>
                         <th>Email</th>
                         <th>Departamento</th>
                         <th>Status</th>
@@ -223,7 +223,7 @@ export default {
                   </table>
                 </div>
               `
-              : `<div class="empty-state">Nenhum funcionario cadastrado. Clique em "Cadastrar Funcionario" para comecar.</div>`
+              : `<div class="empty-state">Nenhum funcionário cadastrado. Clique em "Cadastrar Funcionário" para começar.</div>`
           }
         </section>
 
@@ -231,25 +231,25 @@ export default {
           <div class="module-head compact-head">
             <div>
               <p class="eyebrow muted">Vinculos de acesso</p>
-              <h3>Atribuir Permissoes a Usuarios</h3>
+              <h3>Atribuir Permissões a Usuários</h3>
             </div>
           </div>
           <div class="table-card">
             <table>
               <thead>
                 <tr>
-                  <th>Usuario</th>
+                  <th>Usuário</th>
                   <th>Email</th>
                   <th>Departamento</th>
-                  <th>Papel de Permissao</th>
-                  <th>Acao</th>
+                  <th>Papel de Permissão</th>
+                  <th>Ação</th>
                 </tr>
               </thead>
               <tbody>
                 ${
                   users.length
                     ? users.map((user) => renderPermissionAssignmentRow(user, helpers)).join("")
-                    : `<tr><td colspan="5"><div class="empty-state">Nenhum usuario disponivel.</div></td></tr>`
+                    : `<tr><td colspan="5"><div class="empty-state">Nenhum usuário disponível.</div></td></tr>`
                 }
               </tbody>
             </table>
@@ -379,7 +379,7 @@ export default {
             action: "exclusao",
             level: "Critico",
             itemAffected: button.dataset.deletePermissionRole,
-            description: "Papel de permissao excluido.",
+            description: "Papel de permissão excluido.",
             entityType: "permission_role",
             entityId: button.dataset.deletePermissionRole,
           });
@@ -436,11 +436,11 @@ export default {
             action: "mudanca_status",
             level: "Critico",
             itemAffected: button.dataset.deactivateStaffUser,
-            description: "Funcionario desativado.",
+            description: "Funcionário desativado.",
             entityType: "staff_user",
             entityId: button.dataset.deactivateStaffUser,
           });
-          helpers.showToast("Funcionario desativado.", "success");
+          helpers.showToast("Funcionário desativado.", "success");
         } catch (error) {
           helpers.showToast(helpers.formatError(error), "danger");
         }
@@ -462,11 +462,11 @@ export default {
             action: "exclusao",
             level: "Critico",
             itemAffected: button.dataset.deleteStaffUser,
-            description: "Funcionario inativo excluido.",
+            description: "Funcionário inativo excluido.",
             entityType: "staff_user",
             entityId: button.dataset.deleteStaffUser,
           });
-          helpers.showToast("Funcionario inativo excluido com sucesso.", "success");
+          helpers.showToast("Funcionário inativo excluido com sucesso.", "success");
         } catch (error) {
           helpers.showToast(helpers.formatError(error), "danger");
         }

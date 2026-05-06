@@ -1,7 +1,7 @@
 function getRequiredGlobal(name) {
   const value = window[name];
   if (typeof value !== "function") {
-    throw new Error(`Modulo O.S indisponivel: funcao global ${name} nao encontrada.`);
+    throw new Error(`Módulo O.S indisponível: função global ${name} não encontrada.`);
   }
   return value;
 }

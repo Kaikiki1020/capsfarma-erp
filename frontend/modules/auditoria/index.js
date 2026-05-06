@@ -1,7 +1,7 @@
 function getBridge() {
   const bridge = window.CAPSFARMA_MODULE_BRIDGE;
   if (!bridge) {
-    throw new Error("Bridge modular do ERP indisponivel.");
+    throw new Error("Bridge modular do ERP indisponível.");
   }
   return bridge;
 }
@@ -13,7 +13,7 @@ export default {
     const helpers = bridge.helpers;
 
     if (!bridge.hasPermission("audit", "view")) {
-      return helpers.noPermissionTemplate("Seu perfil nao possui acesso ao modulo de auditoria.");
+      return helpers.noPermissionTemplate("Seu perfil não possui acesso ao módulo de auditoria.");
     }
 
     const logs = state.moduleData.auditLogs || [];
@@ -30,7 +30,7 @@ export default {
           <div>
             <p class="eyebrow muted">Auditoria centralizada</p>
             <h3>Central de Logs</h3>
-            <p class="muted">Registros unificados por modulo com filtros operacionais e rastreabilidade completa.</p>
+            <p class="muted">Registros unificados por módulo com filtros operacionais e rastreabilidade completa.</p>
           </div>
           <div class="module-head-actions">
             <button class="ghost-button" type="button" data-audit-refresh>Atualizar</button>
@@ -39,25 +39,25 @@ export default {
         </div>
 
         <div class="summary-grid">
-          ${helpers.renderKpiCard({ label: "Logs carregados", value: logs.length, note: logs.length ? "Ultimos 500 registros filtrados" : "Nenhum registro encontrado", icon: "◰", tone: "blue" })}
-          ${helpers.renderKpiCard({ label: "Criticos", value: logs.filter((item) => item.nivel === "Critico").length, note: "Eventos de alto impacto", icon: "!", tone: "red" })}
-          ${helpers.renderKpiCard({ label: "Atencao", value: logs.filter((item) => item.nivel === "Atencao").length, note: "Eventos com alerta operacional", icon: "•", tone: "amber" })}
-          ${helpers.renderKpiCard({ label: "Modulos ativos", value: new Set(logs.map((item) => item.modulo).filter(Boolean)).size, note: "Categorias presentes no filtro atual", icon: "⊞", tone: "green" })}
+          ${helpers.renderKpiCard({ label: "Logs carregados", value: logs.length, note: logs.length ? "Últimos 500 registros filtrados" : "Nenhum registro encontrado", icon: "◰", tone: "blue" })}
+          ${helpers.renderKpiCard({ label: "Críticos", value: logs.filter((item) => item.nivel === "Critico").length, note: "Eventos de alto impacto", icon: "!", tone: "red" })}
+          ${helpers.renderKpiCard({ label: "Atenção", value: logs.filter((item) => item.nivel === "Atenção").length, note: "Eventos com alerta operacional", icon: "•", tone: "amber" })}
+          ${helpers.renderKpiCard({ label: "Módulos ativos", value: new Set(logs.map((item) => item.modulo).filter(Boolean)).size, note: "Categorias presentes no filtro atual", icon: "⊞", tone: "green" })}
         </div>
 
         <form id="audit-filter-form" class="table-actions audit-filter-grid">
-          <label>Modulo<select name="module"><option value="all">Todos</option>${helpers.renderOptions(moduleOptions, state.auditFilters.module)}</select></label>
-          <label>Usuario<select name="user"><option value="all">Todos</option>${helpers.renderOptions(userOptions, state.auditFilters.user)}</select></label>
-          <label>Acao<select name="action"><option value="all">Todas</option>${helpers.renderOptions(actionOptions, state.auditFilters.action)}</select></label>
-          <label>Nivel<select name="level">${helpers.renderOptions([
+          <label>Módulo<select name="module"><option value="all">Todos</option>${helpers.renderOptions(moduleOptions, state.auditFilters.module)}</select></label>
+          <label>Usuário<select name="user"><option value="all">Todos</option>${helpers.renderOptions(userOptions, state.auditFilters.user)}</select></label>
+          <label>Ação<select name="action"><option value="all">Todas</option>${helpers.renderOptions(actionOptions, state.auditFilters.action)}</select></label>
+          <label>Nível<select name="level">${helpers.renderOptions([
             { value: "all", label: "Todos" },
             { value: "Informativo", label: "Informativo" },
-            { value: "Atencao", label: "Atencao" },
+            { value: "Atenção", label: "Atenção" },
             { value: "Critico", label: "Critico" },
           ], state.auditFilters.level)}</select></label>
           <label>Data inicial<input name="date_from" type="date" value="${helpers.escapeHtml(state.auditFilters.date_from)}" /></label>
           <label>Data final<input name="date_to" type="date" value="${helpers.escapeHtml(state.auditFilters.date_to)}" /></label>
-          <label class="audit-filter-search">Busca textual<input name="search" type="text" placeholder="Buscar por item, descricao, usuario ou acao..." value="${helpers.escapeHtml(state.auditFilters.search)}" /></label>
+          <label class="audit-filter-search">Busca textual<input name="search" type="text" placeholder="Buscar por item, descrição, usuário ou ação..." value="${helpers.escapeHtml(state.auditFilters.search)}" /></label>
           <div class="form-actions-row">
             <button class="ghost-button" type="button" data-audit-reset>Limpar</button>
             <button class="primary-button" type="submit">Filtrar</button>
@@ -70,11 +70,11 @@ export default {
               <thead>
                 <tr>
                   <th>Data</th>
-                  <th>Modulo</th>
-                  <th>Acao</th>
-                  <th>Usuario</th>
+                  <th>Módulo</th>
+                  <th>Ação</th>
+                  <th>Usuário</th>
                   <th>Item</th>
-                  <th>Nivel</th>
+                  <th>Nível</th>
                   <th></th>
                 </tr>
               </thead>
@@ -109,17 +109,17 @@ export default {
                     </div>
                   </div>
                   <div class="audit-detail-grid">
-                    <div><span>Modulo</span><strong>${helpers.escapeHtml(helpers.getModuleLabel(selectedLog.modulo))}</strong></div>
-                    <div><span>Usuario</span><strong>${helpers.escapeHtml(selectedLog.usuario_nome || "-")}</strong></div>
+                    <div><span>Módulo</span><strong>${helpers.escapeHtml(helpers.getModuleLabel(selectedLog.modulo))}</strong></div>
+                    <div><span>Usuário</span><strong>${helpers.escapeHtml(selectedLog.usuario_nome || "-")}</strong></div>
                     <div><span>Perfil</span><strong>${helpers.escapeHtml(selectedLog.usuario_perfil || "-")}</strong></div>
                     <div><span>Data/Hora</span><strong>${helpers.escapeHtml(helpers.formatDateTime(selectedLog.created_at))}</strong></div>
                     <div><span>IP</span><strong>${helpers.escapeHtml(selectedLog.ip || "-")}</strong></div>
-                    <div><span>Nivel</span><strong>${helpers.escapeHtml(selectedLog.nivel || "-")}</strong></div>
+                    <div><span>Nível</span><strong>${helpers.escapeHtml(selectedLog.nivel || "-")}</strong></div>
                     <div><span>Item afetado</span><strong>${helpers.escapeHtml(selectedLog.item_afetado || "-")}</strong></div>
                     <div><span>Entidade</span><strong>${helpers.escapeHtml(selectedLog.entidade_tipo || "-")} ${helpers.escapeHtml(selectedLog.entidade_id || "")}</strong></div>
                   </div>
                   <section class="form-section">
-                    <h4>Descricao</h4>
+                    <h4>Descrição</h4>
                     <p class="audit-detail-description">${helpers.escapeHtml(selectedLog.descricao || "-")}</p>
                   </section>
                   <section class="form-section">

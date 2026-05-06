@@ -1,15 +1,109 @@
 function getBridge() {
   const bridge = window.CAPSFARMA_MODULE_BRIDGE;
   if (!bridge) {
-    throw new Error("Bridge modular do ERP indisponivel.");
+    throw new Error("Bridge modular do ERP indisponível.");
   }
   return bridge;
 }
 
+function openSalesProductPickerModal({ state, helpers, onSelect }) {
+  const existing = document.querySelector("[data-sales-product-picker-overlay]");
+  if (existing) existing.remove();
+
+  const products = (state.moduleData.products || [])
+    .filter((product) => helpers.isProductVisibleInCommercialDocuments(product))
+    .map((product) => ({
+      id: product.id,
+      code: product.code || "",
+      name: product.name || "",
+      price: Number(
+        String(product.sale_price || 0)
+          .replace(/\./g, "")
+          .replace(",", ".")
+          .replace(/[^\d.-]/g, "")
+      ) || 0,
+      label: `${product.name || "Produto"} (${product.code || "sem código"})`,
+    }));
+
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay sales-document-modal-overlay";
+  overlay.setAttribute("data-sales-product-picker-overlay", "true");
+  overlay.innerHTML = `
+    <div class="modal-card sales-document-modal" role="dialog" aria-modal="true" aria-label="Selecionar produto">
+      <div class="sales-config-header">
+        <div>
+          <p class="eyebrow muted">Vendas</p>
+          <h3>Selecionar Produto</h3>
+          <p class="muted">Pesquise o produto para incluir no orçamento ou na venda.</p>
+        </div>
+        <div class="sales-config-header-actions">
+          <button class="ghost-button" type="button" data-sales-product-picker-close>Fechar</button>
+        </div>
+      </div>
+      <div class="table-actions">
+        <label class="search-input-shell">
+          <span class="search-input-icon">⌕</span>
+          <input type="text" placeholder="Buscar produto..." data-sales-product-picker-search />
+        </label>
+      </div>
+      <div class="table-card" style="max-height: 55vh; overflow: auto;">
+        <div data-sales-product-picker-results></div>
+      </div>
+    </div>
+  `;
+
+  const close = () => overlay.remove();
+  const results = overlay.querySelector("[data-sales-product-picker-results]");
+  const searchInput = overlay.querySelector("[data-sales-product-picker-search]");
+
+  const renderResults = (term = "") => {
+    const normalized = String(term || "").trim().toLowerCase();
+    const filtered = !normalized
+      ? products
+      : products.filter((product) =>
+        product.name.toLowerCase().includes(normalized)
+        || product.code.toLowerCase().includes(normalized)
+      );
+
+    results.innerHTML = filtered.length
+      ? filtered.map((product) => `
+          <button class="bom-file-card" type="button" data-sales-product-picker-select="${product.id}" style="width:100%; text-align:left; cursor:pointer;">
+            <div>
+              <strong>${product.label}</strong>
+              <div class="table-inline-copy muted">${helpers.formatCurrency(product.price || 0)}</div>
+            </div>
+          </button>
+        `).join("")
+      : `<div class="empty-state">Nenhum produto encontrado.</div>`;
+
+    results.querySelectorAll("[data-sales-product-picker-select]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const selected = products.find((product) => product.id === button.dataset.salesProductPickerSelect);
+        if (!selected) return;
+        onSelect(selected);
+        close();
+      });
+    });
+  };
+
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay || event.target.hasAttribute("data-sales-product-picker-close")) {
+      close();
+    }
+  });
+
+  searchInput?.addEventListener("input", () => renderResults(searchInput.value));
+  document.body.appendChild(overlay);
+  renderResults("");
+  searchInput?.focus();
+}
+
 function renderSalesItemRow(item, index, state, helpers) {
-  const productOptions = (state.moduleData.products || []).map((product) => ({
-    value: product.id,
-    label: `${product.name} (${product.code})`,
+  const selectedProduct = (state.moduleData.products || []).find((product) => product.id === item.product_id);
+  const saleOptions = helpers.normalizeProductSaleOptions(selectedProduct);
+  const saleOptionOptions = saleOptions.map((option) => ({
+    value: option.id,
+    label: `${option.code ? `${option.code} - ` : ""}${option.label} - ${helpers.formatCurrency(option.price)}`,
   }));
   const subtotal = Number(item.quantity || 0) * Number(item.unit_price || 0) - Number(item.discount || 0);
 
@@ -17,21 +111,34 @@ function renderSalesItemRow(item, index, state, helpers) {
     <article class="sales-item-row" data-sales-item-index="${index}">
       <label>
         Produto
-        <select data-sales-item-field="product_id" data-sales-item-index="${index}">
-          <option value="">Selecione um produto</option>
-          ${helpers.renderOptions(productOptions, item.product_id)}
-        </select>
+        <input data-sales-item-field="product_id" data-sales-item-index="${index}" type="hidden" value="${helpers.escapeHtml(item.product_id)}" />
+        <span class="customer-cnpj-field">
+          <input type="text" readonly value="${helpers.escapeHtml(selectedProduct ? `${selectedProduct.name} (${selectedProduct.code})` : "")}" placeholder="Selecione um produto" data-sales-open-product-picker="${index}" />
+          <button class="ghost-button secondary-surface-button" type="button" data-sales-open-product-picker="${index}">Selecionar</button>
+        </span>
       </label>
       <label>
-        Codigo
+        Código
         <input data-sales-item-field="product_code" data-sales-item-index="${index}" type="text" readonly value="${helpers.escapeHtml(item.product_code)}" />
       </label>
+      ${
+        saleOptions.length
+          ? `
+            <label>
+              Opção
+              <select data-sales-item-field="sale_option_id" data-sales-item-index="${index}">
+                ${helpers.renderOptions(saleOptionOptions, item.sale_option_id)}
+              </select>
+            </label>
+          `
+          : ""
+      }
       <label>
         Quantidade
-        <input data-sales-item-field="quantity" data-sales-item-index="${index}" type="number" min="0.01" step="0.01" value="${helpers.escapeHtml(item.quantity)}" />
+        <input data-sales-item-field="quantity" data-sales-item-index="${index}" type="number" min="1" step="1" value="${helpers.escapeHtml(item.quantity)}" />
       </label>
       <label>
-        Valor unitario
+        Valor unitário
         <input
           data-sales-item-field="unit_price"
           data-sales-item-index="${index}"
@@ -63,7 +170,100 @@ function renderSalesItemRow(item, index, state, helpers) {
   `;
 }
 
+function openSalesProductPickerForItem({ itemIndex, state, helpers }) {
+  openSalesProductPickerModal({
+    state,
+    helpers,
+    onSelect: (product) => {
+      helpers.handleSalesItemFieldChange({
+        currentTarget: {
+          dataset: {
+            salesItemIndex: String(itemIndex),
+            salesItemField: "product_id",
+          },
+          value: product.id,
+        },
+      });
+    },
+  });
+}
+
+function renderSalesPaymentConditionsPanel(state, helpers, totals) {
+  const baseTotal = Math.max(0, Number(totals.subtotal || 0) - Number(totals.itemDiscount || 0));
+  const conditions = helpers.getSalesPaymentConditionsForDisplay
+    ? helpers.getSalesPaymentConditionsForDisplay(state.salesDraft.payment_conditions || [], baseTotal)
+    : state.salesDraft.payment_conditions?.length
+      ? state.salesDraft.payment_conditions
+      : [helpers.createEmptySalesPaymentCondition({ amount: baseTotal || "" })];
+  const hasPixDiscount = helpers.getSalesPixDiscountPercent() > 0;
+  const methodOptions = [
+    { value: "", label: "Selecione" },
+    { value: "boleto", label: "Boleto" },
+    { value: "pix", label: "Pix" },
+    { value: "transferencia", label: "Transferência" },
+    { value: "cartao", label: "Cartão" },
+    { value: "dinheiro", label: "Dinheiro" },
+    { value: "cheque", label: "Cheque" },
+    { value: "negociado_com_o_dono", label: "Negociado" },
+  ];
+
+  return `
+    <div class="sales-items-panel">
+      <div class="sales-items-header">
+        <h5>Condições de pagamento</h5>
+        <button class="ghost-button" type="button" data-sales-add-payment>+ Adicionar condição</button>
+      </div>
+      <div class="sales-items-list">
+        ${conditions.map((condition, index) => {
+          const amount = Number(condition.amount || 0) > 0
+            ? Number(condition.amount || 0)
+            : baseTotal * (Number(condition.percentage || 0) / 100);
+          const installmentText = Number(condition.installments || 1) > 1
+            ? `${condition.installments}x de ${helpers.formatCurrency(amount / Number(condition.installments || 1))}`
+            : "Parcela única";
+          return `
+            <article class="sales-item-row" data-sales-payment-row data-sales-payment-index="${index}" data-sales-payment-id="${helpers.escapeHtml(condition.id || "")}">
+              <label>
+                Forma
+                <select name="sales_payment_method" data-sales-payment-field>
+                  ${helpers.renderOptions(methodOptions, condition.method || "")}
+                </select>
+              </label>
+              <label>
+                Valor
+                <input name="sales_payment_amount" data-sales-payment-field type="number" min="0" step="0.01" value="${helpers.escapeHtml(amount || "")}" />
+              </label>
+              <label>
+                Parcelas
+                <input name="sales_payment_installments" data-sales-payment-field type="number" min="1" step="1" value="${helpers.escapeHtml(condition.installments || 1)}" />
+              </label>
+              <label>
+                Observação
+                <input name="sales_payment_notes" data-sales-payment-field type="text" value="${helpers.escapeHtml(condition.notes || "")}" />
+              </label>
+              <div class="sales-item-subtotal">
+                <span>Condição</span>
+                <strong data-sales-payment-subtotal="${index}">${helpers.formatCurrency(amount)}</strong>
+                <small data-sales-payment-installment-value="${index}">${helpers.escapeHtml(installmentText)}</small>
+              </div>
+              <button class="inline-button danger-button sales-item-remove" type="button" data-sales-remove-payment="${index}">Remover</button>
+            </article>
+          `;
+        }).join("")}
+      </div>
+      <div class="product-import-hint">
+        <strong>Pix</strong>
+        <span>${hasPixDiscount ? "Desconto automático aplicado sobre o valor informado em Pix." : "Sem desconto automático configurado para Pix."}</span>
+      </div>
+    </div>
+  `;
+}
+
 function renderSaleActionCell(item, metadata, canEdit) {
+  const canSendToProduction = metadata.status === "finalized"
+    && !metadata.productionGenerated
+    && !(metadata.productionOrderIds || []).length;
+
   if (!canEdit) {
     return `
       <div class="action-button-group">
@@ -75,7 +275,7 @@ function renderSaleActionCell(item, metadata, canEdit) {
   return `
     <div class="action-button-group">
       <button class="inline-button" type="button" data-sales-generate-document="${metadata.status === "quote" ? "quote" : "sale"}" data-sales-document-id="${item.id}">
-        ${metadata.status === "quote" ? "Orcamento" : "Venda PDF"}
+        ${metadata.status === "quote" ? "Orçamento" : "Venda PDF"}
       </button>
       ${
         metadata.status === "quote"
@@ -90,6 +290,11 @@ function renderSaleActionCell(item, metadata, canEdit) {
           ? `<button class="inline-button movement-button" type="button" data-sales-finalize-id="${item.id}">Finalizar venda</button>`
           : ""
       }
+      ${
+        canSendToProduction
+          ? `<button class="inline-button movement-button" type="button" data-sales-send-production-id="${item.id}">Enviar para produção</button>`
+          : ""
+      }
       <button class="inline-button danger-button" type="button" data-sales-delete-id="${item.id}">Excluir</button>
     </div>
   `;
@@ -98,7 +303,7 @@ function renderSaleActionCell(item, metadata, canEdit) {
 function renderSaleRow(item, canEdit, helpers) {
   const metadata = helpers.getSaleMetadata(item);
   const itemSummary = metadata.items.length
-    ? metadata.items.map((saleItem) => `${saleItem.product_name || "-"} x ${helpers.formatQuantity(saleItem.quantity || 0)}`).join(" • ")
+    ? metadata.items.map((saleItem) => `${saleItem.product_name || "-"} x ${helpers.formatWholeQuantity(saleItem.quantity || 0)}`).join(" • ")
     : "Sem itens";
 
   return `
@@ -110,7 +315,7 @@ function renderSaleRow(item, canEdit, helpers) {
       </td>
       <td>${helpers.formatDate(item.sale_date)}</td>
       <td>${helpers.formatDate(item.delivery_date)}</td>
-      <td>${helpers.escapeHtml(helpers.getPaymentMethodLabel(metadata.paymentMethod))}</td>
+      <td>${helpers.escapeHtml(metadata.paymentConditions?.length ? helpers.getSalesPaymentConditionsLabel(metadata.paymentConditions, metadata.total || metadata.subtotal || 0) : helpers.getPaymentMethodLabel(metadata.paymentMethod))}</td>
       <td>${helpers.saleStatusCell(metadata.status)}</td>
       <td>${helpers.formatCurrency(metadata.total)}</td>
       <td>${renderSaleActionCell(item, metadata, canEdit)}</td>
@@ -121,6 +326,7 @@ function renderSaleRow(item, canEdit, helpers) {
 function renderSalesTemplateSettingsForm(type, template, canManageConfig, helpers) {
   const disabled = canManageConfig ? "" : "disabled";
   const isContract = type === "contract";
+  const pdfSize = helpers.getSalesTemplatePdfSize(template.pdf_template_data_url);
 
   return `
     <form id="sales-config-template-form" class="sales-config-form" data-sales-config-form="${type}">
@@ -131,17 +337,17 @@ function renderSalesTemplateSettingsForm(type, template, canManageConfig, helper
           <input name="name" type="text" value="${helpers.escapeHtml(template.name)}" ${disabled} />
         </label>
         <label>
-          Titulo do documento
+          Título do documento
           <input name="title" type="text" value="${helpers.escapeHtml(template.title)}" ${disabled} />
         </label>
         <label>
-          Validade do orcamento
+          Validade do orçamento
           <input name="validity_days" type="number" min="0" step="1" value="${helpers.escapeHtml(template.validity_days)}" ${disabled} />
         </label>
       </div>
 
       <label>
-        Cabecalho
+        Cabeçalho
         <textarea name="header" ${disabled}>${helpers.escapeHtml(template.header)}</textarea>
       </label>
       ${
@@ -154,14 +360,14 @@ function renderSalesTemplateSettingsForm(type, template, canManageConfig, helper
           `
           : `
             <label>
-              Texto de apresentacao
+              Texto de apresentação
               <textarea name="presentation_text" ${disabled}>${helpers.escapeHtml(template.presentation_text)}</textarea>
             </label>
           `
       }
       <div class="sales-config-grid">
         <label>
-          Condicoes de pagamento
+          Condições de pagamento
           <textarea name="payment_terms" ${disabled}>${helpers.escapeHtml(template.payment_terms)}</textarea>
         </label>
         <label>
@@ -180,7 +386,7 @@ function renderSalesTemplateSettingsForm(type, template, canManageConfig, helper
         </label>
       </div>
       <label>
-        Observacoes
+        Observações
         <textarea name="notes" ${disabled}>${helpers.escapeHtml(template.notes)}</textarea>
       </label>
       <label>
@@ -192,9 +398,56 @@ function renderSalesTemplateSettingsForm(type, template, canManageConfig, helper
         <textarea name="final_message" ${disabled}>${helpers.escapeHtml(template.final_message)}</textarea>
       </label>
       <label>
-        Rodape
+        Rodapé
         <textarea name="footer" ${disabled}>${helpers.escapeHtml(template.footer)}</textarea>
       </label>
+      <div class="sales-config-pdf-card">
+        <div class="sales-config-pdf-copy">
+          <strong>PDF base do modelo</strong>
+          <p class="muted">
+            Envie o PDF padrão usado pela sua equipe para orçamento, venda ou contrato. Limite de ${helpers.formatFileSize(2 * 1024 * 1024)}.
+          </p>
+        </div>
+        <div class="sales-config-grid">
+          <label>
+            Arquivo PDF
+            <input name="pdf_template_file" type="file" accept="application/pdf,.pdf" ${disabled} />
+          </label>
+          <label>
+            Última atualização
+            <input
+              name="pdf_template_updated_at"
+              type="text"
+              value="${helpers.escapeHtml(template.pdf_template_updated_at ? helpers.formatDateTime(template.pdf_template_updated_at) : "Nenhum PDF carregado")}"
+              readonly
+            />
+          </label>
+        </div>
+        ${
+          template.pdf_template_data_url
+            ? `
+              <div class="sales-config-file-pill">
+                <div>
+                  <strong>${helpers.escapeHtml(template.pdf_template_name || "modelo.pdf")}</strong>
+                  <div class="table-inline-copy muted">${helpers.formatFileSize(pdfSize)} • PDF pronto para consulta</div>
+                </div>
+                <div class="sales-config-file-actions">
+                  <button class="ghost-button" type="button" data-sales-template-open-pdf="${type}">Abrir PDF</button>
+                  ${
+                    canManageConfig
+                      ? `<button class="ghost-button danger-button" type="button" data-sales-template-remove-pdf="${type}">Remover PDF</button>`
+                      : ""
+                  }
+                </div>
+              </div>
+            `
+            : `
+              <p class="muted">
+                Nenhum PDF carregado ainda. O sistema continuará usando somente o modelo editável com placeholders.
+              </p>
+            `
+        }
+      </div>
       <label>
         ${isContract ? "Texto completo do contrato" : "Editor do modelo (HTML com placeholders)"}
         <textarea name="body_html" class="sales-config-html-editor ${isContract ? "sales-config-contract-editor" : ""}" ${disabled}>${helpers.escapeHtml(template.body_html)}</textarea>
@@ -204,7 +457,7 @@ function renderSalesTemplateSettingsForm(type, template, canManageConfig, helper
           ? `
             <p class="muted">
               Escreva aqui o contrato completo. Use os placeholders para preencher automaticamente dados do cliente,
-              empresa, valores, itens e condicoes negociadas. O cabecalho e o rodape permanecem em campos separados.
+              empresa, valores, itens e condições negociadas. O cabeçalho e o rodapé permanecem em campos separados.
             </p>
           `
           : ""
@@ -214,9 +467,9 @@ function renderSalesTemplateSettingsForm(type, template, canManageConfig, helper
         ${
           canManageConfig
             ? `
-              <button class="ghost-button" type="button" data-sales-template-restore="${type}">Restaurar padrao</button>
+              <button class="ghost-button" type="button" data-sales-template-restore="${type}">Restaurar padrão</button>
               <button class="secondary-button" type="button" data-sales-template-save="${type}">Salvar modelo</button>
-              <button class="primary-button" type="button" data-sales-template-default="${type}">Definir como padrao</button>
+              <button class="primary-button" type="button" data-sales-template-default="${type}">Definir como padrão</button>
             `
             : ""
         }
@@ -225,7 +478,7 @@ function renderSalesTemplateSettingsForm(type, template, canManageConfig, helper
   `;
 }
 
-function renderSalesCompanySettingsForm(company, numbering, canManageConfig, helpers) {
+function renderSalesCompanySettingsForm(company, numbering, commercial, canManageConfig, helpers) {
   const disabled = canManageConfig ? "" : "disabled";
   const yearSuffix = String(new Date().getFullYear()).slice(-2);
 
@@ -257,29 +510,29 @@ function renderSalesCompanySettingsForm(company, numbering, canManageConfig, hel
           <input name="site" type="text" value="${helpers.escapeHtml(company.site)}" ${disabled} />
         </label>
         <label>
-          Endereco
+          Endereço
           <input name="address" type="text" value="${helpers.escapeHtml(company.address)}" ${disabled} />
         </label>
       </div>
       <div class="sales-config-grid">
         <label>
-          Responsavel
+          Responsável
           <input name="responsible_name" type="text" value="${helpers.escapeHtml(company.responsible_name)}" ${disabled} />
         </label>
         <label>
-          Cargo do responsavel
+          Cargo do responsável
           <input name="responsible_role" type="text" value="${helpers.escapeHtml(company.responsible_role)}" ${disabled} />
         </label>
       </div>
       <label>
-        Assinatura do responsavel
+        Assinatura do responsável
         <textarea name="signature" ${disabled}>${helpers.escapeHtml(company.signature)}</textarea>
       </label>
       <div class="sales-config-numbering-card">
-        <h4>Numeracao automatica</h4>
-        <p class="muted">A numeracao agora eh gerada automaticamente no backend, por tipo e por ano, sem edicao manual.</p>
+        <h4>Numeração automática</h4>
+        <p class="muted">A numeração agora é gerada automaticamente no backend, por tipo e por ano, sem edição manual.</p>
         <div class="sales-config-numbering-grid">
-          <div><strong>Orcamento</strong><span>ORC-01${yearSuffix}</span></div>
+          <div><strong>Orçamento</strong><span>ORC-01${yearSuffix}</span></div>
           <div><strong>Venda</strong><span>VEN-01${yearSuffix}</span></div>
           <div><strong>Contrato</strong><span>CONT-01${yearSuffix}</span></div>
         </div>
@@ -288,6 +541,10 @@ function renderSalesCompanySettingsForm(company, numbering, canManageConfig, hel
         <label>
           Logo
           <input name="logo_file" type="file" accept="image/*" ${disabled} />
+        </label>
+        <label>
+          Desconto Pix (%)
+          <input name="pix_discount_percent" type="number" min="0" max="100" step="0.01" value="${helpers.escapeHtml(commercial?.pix_discount_percent || 0)}" ${disabled} />
         </label>
       </div>
       ${
@@ -314,10 +571,13 @@ function renderSalesCompanySettingsForm(company, numbering, canManageConfig, hel
 function renderSalesConfigModal(canManageConfig, state, helpers) {
   const activeTab = state.salesConfigTab || "quote";
   const settings = state.salesDocumentSettings;
-  const template = helpers.getSalesTemplate(activeTab === "company" ? "quote" : activeTab);
-  const preview = helpers.resolveSalesTemplateContent(activeTab === "company" ? "quote" : activeTab, null);
+  const previewType = activeTab === "company" ? "quote" : activeTab;
+  const template = helpers.getSalesTemplate(previewType);
+  const preview = helpers.resolveSalesTemplateContent(previewType, null);
+  const hasTemplatePdf = Boolean(template.pdf_template_data_url);
+  const templatePdfSize = helpers.getSalesTemplatePdfSize(template.pdf_template_data_url);
   const tabs = [
-    { key: "quote", label: "Orcamento" },
+    { key: "quote", label: "Orçamento" },
     { key: "sale", label: "Venda" },
     { key: "contract", label: "Contrato" },
     { key: "company", label: "Dados da Empresa" },
@@ -325,15 +585,15 @@ function renderSalesConfigModal(canManageConfig, state, helpers) {
 
   return `
     <div class="modal-overlay sales-config-overlay" data-sales-config-close>
-      <div class="modal-card sales-config-modal" role="dialog" aria-modal="true" aria-label="Configuracao de modelos comerciais" data-sales-config-card>
+      <div class="modal-card sales-config-modal" role="dialog" aria-modal="true" aria-label="Configuração de modelos comerciais" data-sales-config-card>
         <div class="sales-config-header">
           <div>
             <p class="eyebrow muted">Modelos Comerciais</p>
             <h3>Config</h3>
-            <p class="muted">Configure os modelos de orcamento, venda, contrato e os dados fixos da empresa.</p>
+            <p class="muted">Configure os modelos de orçamento, venda, contrato e os dados fixos da empresa.</p>
           </div>
           <div class="sales-config-header-actions">
-            ${canManageConfig ? `<span class="status-chip chip-green">Edicao liberada</span>` : `<span class="status-chip chip-blue">Somente leitura</span>`}
+            ${canManageConfig ? `<span class="status-chip chip-green">Edição liberada</span>` : `<span class="status-chip chip-blue">Somente leitura</span>`}
             <button class="ghost-button" type="button" data-sales-config-close-button>Fechar</button>
           </div>
         </div>
@@ -350,7 +610,7 @@ function renderSalesConfigModal(canManageConfig, state, helpers) {
           <section class="sales-config-editor">
             ${
               activeTab === "company"
-                ? renderSalesCompanySettingsForm(settings.company, settings.numbering, canManageConfig, helpers)
+                ? renderSalesCompanySettingsForm(settings.company, settings.numbering, settings.commercial, canManageConfig, helpers)
                 : renderSalesTemplateSettingsForm(activeTab, template, canManageConfig, helpers)
             }
           </section>
@@ -358,17 +618,45 @@ function renderSalesConfigModal(canManageConfig, state, helpers) {
           <aside class="sales-config-preview-panel">
             <div class="sales-config-preview-head">
               <div>
-                <span class="eyebrow muted">Pre-visualizacao</span>
-                <h4>${activeTab === "company" ? "Orcamento Padrao" : template.title}</h4>
+                <span class="eyebrow muted">Pré-visualização</span>
+                <h4>${activeTab === "company" ? "Orçamento Padrão" : template.title}</h4>
               </div>
               <div class="sales-config-preview-actions">
-                <button class="ghost-button" type="button" data-sales-template-preview="${activeTab === "company" ? "quote" : activeTab}">Visualizar modelo</button>
-                <button class="secondary-button" type="button" data-sales-template-generate="${activeTab === "company" ? "quote" : activeTab}">Gerar previa</button>
+                ${
+                  hasTemplatePdf
+                    ? `<button class="ghost-button" type="button" data-sales-template-open-pdf="${previewType}">Abrir PDF base</button>`
+                    : ""
+                }
+                <button class="ghost-button" type="button" data-sales-template-preview="${previewType}">Visualizar modelo</button>
+                <button class="secondary-button" type="button" data-sales-template-generate="${previewType}">Gerar prévia</button>
               </div>
             </div>
             <div class="sales-config-placeholders">
-              ${helpers.getSalesTemplatePlaceholderList(activeTab === "company" ? "quote" : activeTab).map((item) => `<code>${item}</code>`).join("")}
+              ${helpers.getSalesTemplatePlaceholderList(previewType).map((item) => `<code>${item}</code>`).join("")}
             </div>
+            ${
+              hasTemplatePdf
+                ? `
+                  <section class="sales-config-pdf-preview-card">
+                    <div class="sales-config-pdf-preview-head">
+                      <div>
+                        <strong>PDF base carregado</strong>
+                        <p class="muted">${helpers.escapeHtml(template.pdf_template_name || "modelo.pdf")} • ${helpers.formatFileSize(templatePdfSize)}</p>
+                      </div>
+                      <span class="status-chip chip-blue">Referência visual</span>
+                    </div>
+                    <iframe
+                      class="sales-config-pdf-frame"
+                      title="PDF base do modelo ${helpers.escapeHtml(template.title || previewType)}"
+                      src="${template.pdf_template_data_url}"
+                    ></iframe>
+                    <p class="muted">
+                      O PDF serve como base visual do documento. As variáveis e ajustes continuam no editor do modelo abaixo.
+                    </p>
+                  </section>
+                `
+                : ""
+            }
             <div class="sales-document-preview-frame">${preview.html}</div>
           </aside>
         </div>
@@ -380,20 +668,40 @@ function renderSalesConfigModal(canManageConfig, state, helpers) {
 function renderSalesDocumentPreviewModal(state, helpers) {
   return `
     <div class="modal-overlay sales-document-modal-overlay" data-sales-preview-close>
-      <div class="modal-card sales-document-modal" role="dialog" aria-modal="true" aria-label="Visualizacao do documento comercial" data-sales-preview-card>
+      <div class="modal-card sales-document-modal" role="dialog" aria-modal="true" aria-label="Visualização do documento comercial" data-sales-preview-card>
         <div class="sales-config-header">
           <div>
             <p class="eyebrow muted">Documento Comercial</p>
             <h3>${helpers.escapeHtml(state.salesDocumentPreview.title || "Previa")}</h3>
-            <p class="muted">Documento pronto para impressao, exportacao em PDF e envio ao cliente.</p>
+            <p class="muted">Documento pronto para impressão, exportação em PDF e envio ao cliente.</p>
           </div>
           <div class="sales-config-header-actions">
+            ${
+              state.salesDocumentPreview.templatePdfDataUrl
+                ? `<button class="ghost-button" type="button" data-sales-preview-open-template-pdf>PDF base</button>`
+                : ""
+            }
             <button class="secondary-button" type="button" data-sales-preview-export>Baixar PDF</button>
             <button class="ghost-button" type="button" data-sales-preview-print>Imprimir</button>
             <button class="primary-button" type="button" data-sales-preview-send>Enviar ao cliente</button>
             <button class="ghost-button" type="button" data-sales-preview-close-button>Fechar</button>
           </div>
         </div>
+        ${
+          state.salesDocumentPreview.templatePdfDataUrl
+            ? `
+              <div class="sales-config-pdf-preview-card sales-config-pdf-preview-inline">
+                <div class="sales-config-pdf-preview-head">
+                  <div>
+                    <strong>PDF base vinculado</strong>
+                    <p class="muted">${helpers.escapeHtml(state.salesDocumentPreview.templatePdfName || "modelo.pdf")}</p>
+                  </div>
+                  <span class="status-chip chip-blue">Modelo original</span>
+                </div>
+              </div>
+            `
+            : ""
+        }
         <div class="sales-document-preview-frame sales-document-preview-modal-frame">${state.salesDocumentPreview.html}</div>
       </div>
     </div>
@@ -406,7 +714,7 @@ function bindSalesConfigEvents(bridge) {
 
   const ensureSalesConfigAccess = () => {
     if (helpers.canManageSalesTemplates()) return true;
-    helpers.showToast("Somente TI e ADMINISTRADOR podem alterar a configuracao de vendas.", "warning");
+    helpers.showToast("Somente TI e ADMINISTRADOR podem alterar a configuração de vendas.", "warning");
     return false;
   };
 
@@ -435,6 +743,13 @@ function bindSalesConfigEvents(bridge) {
     });
   });
 
+  document.querySelectorAll("[data-sales-template-open-pdf]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const template = helpers.getSalesTemplate(button.dataset.salesTemplateOpenPdf);
+      helpers.openSalesTemplatePdf(template.pdf_template_data_url);
+    });
+  });
+
   document.querySelectorAll("[data-sales-template-save]").forEach((button) => {
     button.addEventListener("click", async () => {
       if (!ensureSalesConfigAccess()) return;
@@ -455,7 +770,7 @@ function bindSalesConfigEvents(bridge) {
       try {
         helpers.syncSalesTemplateFromForm(button.dataset.salesTemplateDefault);
         await helpers.persistSalesDocumentSettings();
-        helpers.showToast("Modelo definido como padrao.", "success");
+        helpers.showToast("Modelo definido como padrão.", "success");
         helpers.renderActiveModule();
       } catch (error) {
         helpers.showToast(helpers.formatError(error), "danger");
@@ -470,7 +785,7 @@ function bindSalesConfigEvents(bridge) {
         state.salesDocumentSettings.templates[button.dataset.salesTemplateRestore] = helpers.createDefaultSalesTemplate(button.dataset.salesTemplateRestore);
         await helpers.persistSalesDocumentSettings();
         helpers.renderActiveModule();
-        helpers.showToast("Modelo restaurado para o padrao.", "success");
+        helpers.showToast("Modelo restaurado para o padrão.", "success");
       } catch (error) {
         helpers.showToast(helpers.formatError(error), "danger");
       }
@@ -505,7 +820,7 @@ function bindSalesConfigEvents(bridge) {
       void helpers.queueSystemLog({
         moduleKey: "sales",
         action: "edicao",
-        level: "Atencao",
+        level: "Atenção",
         itemAffected: "Logo da empresa",
         description: "Logo removida dos modelos comerciais.",
         entityType: "sales_company_settings",
@@ -540,6 +855,87 @@ function bindSalesConfigEvents(bridge) {
       }
     });
   }
+
+  document.querySelectorAll("[data-sales-template-remove-pdf]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      if (!ensureSalesConfigAccess()) return;
+      try {
+        helpers.syncSalesTemplateFromForm(button.dataset.salesTemplateRemovePdf);
+        state.salesDocumentSettings.templates[button.dataset.salesTemplateRemovePdf] = {
+          ...state.salesDocumentSettings.templates[button.dataset.salesTemplateRemovePdf],
+          pdf_template_name: "",
+          pdf_template_data_url: "",
+          pdf_template_updated_at: "",
+        };
+        await helpers.persistSalesDocumentSettings();
+        void helpers.queueSystemLog({
+          moduleKey: "sales",
+          action: "edicao",
+          level: "Atenção",
+          itemAffected: `PDF ${button.dataset.salesTemplateRemovePdf}`,
+          description: "PDF base removido do modelo comercial.",
+          entityType: "sales_template_settings",
+        });
+        helpers.renderActiveModule();
+        helpers.showToast("PDF base removido com sucesso.", "success");
+      } catch (error) {
+        helpers.showToast(helpers.formatError(error), "danger");
+      }
+    });
+  });
+
+  const templatePdfInput = document.querySelector('#sales-config-template-form input[name="pdf_template_file"]');
+  if (templatePdfInput) {
+    templatePdfInput.addEventListener("change", async (event) => {
+      if (!ensureSalesConfigAccess()) return;
+      const templateType = state.salesConfigTab;
+      const file = event.currentTarget.files?.[0];
+      if (!file || !templateType || templateType === "company") return;
+
+      if (!state.supabase || !state.accessToken) {
+        helpers.showToast("Conecte o sistema ao Supabase antes de enviar PDFs dos modelos.", "warning");
+        event.currentTarget.value = "";
+        return;
+      }
+
+      if (file.type !== "application/pdf" && !String(file.name || "").toLowerCase().endsWith(".pdf")) {
+        helpers.showToast("Selecione um arquivo PDF válido.", "warning");
+        event.currentTarget.value = "";
+        return;
+      }
+
+      if (file.size > 2 * 1024 * 1024) {
+        helpers.showToast(`O PDF precisa ter no máximo ${helpers.formatFileSize(2 * 1024 * 1024)}.`, "warning");
+        event.currentTarget.value = "";
+        return;
+      }
+
+      try {
+        helpers.syncSalesTemplateFromForm(templateType);
+        state.salesDocumentSettings.templates[templateType] = {
+          ...state.salesDocumentSettings.templates[templateType],
+          pdf_template_name: file.name || `${templateType}.pdf`,
+          pdf_template_data_url: await helpers.readFileAsDataUrl(file),
+          pdf_template_updated_at: new Date().toISOString(),
+        };
+        await helpers.persistSalesDocumentSettings();
+        void helpers.queueSystemLog({
+          moduleKey: "sales",
+          action: "edicao",
+          level: "Informativo",
+          itemAffected: `PDF ${templateType}`,
+          description: "PDF base atualizado no modelo comercial.",
+          entityType: "sales_template_settings",
+        });
+        helpers.renderActiveModule();
+        helpers.showToast("PDF base carregado com sucesso.", "success");
+      } catch (error) {
+        helpers.showToast(helpers.formatError(error), "danger");
+      } finally {
+        event.currentTarget.value = "";
+      }
+    });
+  }
 }
 
 function bindSalesDocumentPreviewEvents(bridge) {
@@ -563,6 +959,9 @@ function bindSalesDocumentPreviewEvents(bridge) {
   document.querySelector("[data-sales-preview-print]")?.addEventListener("click", () => {
     helpers.openPrintWindowForHtml(state.salesDocumentPreview.html, state.salesDocumentPreview.title);
   });
+  document.querySelector("[data-sales-preview-open-template-pdf]")?.addEventListener("click", () => {
+    helpers.openSalesTemplatePdf(state.salesDocumentPreview.templatePdfDataUrl);
+  });
   document.querySelector("[data-sales-preview-send]")?.addEventListener("click", () => {
     helpers.openPreparedSalesDocumentShare();
   });
@@ -575,7 +974,7 @@ export default {
     const helpers = bridge.helpers;
 
     if (!bridge.hasPermission("sales", "view")) {
-      return helpers.noPermissionTemplate("Seu perfil nao possui acesso ao modulo de vendas.");
+      return helpers.noPermissionTemplate("Seu perfil não possui acesso ao módulo de vendas.");
     }
 
     const canEdit = bridge.hasPermission("sales", "edit");
@@ -602,6 +1001,12 @@ export default {
     }));
     const salesSummaryLabel = `${sales.length} ${sales.length === 1 ? "venda registrada" : "vendas registradas"}`;
     const totals = helpers.getSalesDraftTotals();
+    const isQuoteDraft = state.salesDraft.status === "quote";
+    const calculatedDeliveryDate = state.salesDraft.status === "finalized" && state.salesDraft.sale_date && state.salesDraft.delivery_days
+      ? helpers.addDaysToIsoDate(state.salesDraft.sale_date, state.salesDraft.delivery_days)
+      : state.salesDraft.delivery_date;
+    const selectedCustomer = (state.moduleData.customers || []).find((customer) => customer.id === state.salesDraft.customer_id);
+    const selectedCustomerMetadata = selectedCustomer ? helpers.getCustomerMetadata(selectedCustomer) : {};
 
     return `
       <section class="module-panel sales-module">
@@ -627,7 +1032,7 @@ export default {
                 <span class="production-toggle-icon">${isFormOpen && state.salesDraft.status === "finalized" ? "▴" : "▾"}</span>
               </button>
               <button class="ghost-button sales-create-button ${isFormOpen && state.salesDraft.status === "quote" ? "is-open" : ""}" type="button" data-sales-open-mode="quote">
-                <span>Novo Orcamento</span>
+                <span>Novo Orçamento</span>
                 <span class="production-toggle-icon">${isFormOpen && state.salesDraft.status === "quote" ? "▴" : "▾"}</span>
               </button>
             ` : ""}
@@ -641,8 +1046,8 @@ export default {
                 <div class="sales-accordion-card">
                   <div class="sales-form-header">
                     <div>
-                      <h4>${state.salesDraft.edit_id ? "Editar Venda" : state.salesDraft.status === "quote" ? "Novo Orcamento" : "Nova Venda"}</h4>
-                      <p class="muted">Fluxo comercial com integracao entre clientes, produtos e producao.</p>
+                      <h4>${state.salesDraft.edit_id ? (isQuoteDraft ? "Editar Orçamento" : "Editar Venda") : isQuoteDraft ? "Novo Orçamento" : "Nova Venda"}</h4>
+                      <p class="muted">${isQuoteDraft ? "Orçamento com validade ajustável e itens da venda." : "Fluxo comercial com integração entre clientes, produtos e produção."}</p>
                     </div>
                   </div>
 
@@ -650,69 +1055,135 @@ export default {
                     <input type="hidden" name="edit_id" value="${helpers.escapeHtml(state.salesDraft.edit_id)}" />
                     <input type="hidden" name="production_generated" value="${state.salesDraft.production_generated ? "true" : "false"}" />
 
-                    <div class="sales-form-row">
-                      <label>
-                        Cliente *
-                        <select name="customer_id" required>
-                          <option value="">Selecione um cliente</option>
-                          ${helpers.renderOptions(customerOptions, state.salesDraft.customer_id)}
-                        </select>
-                      </label>
-                      <label>
-                        CNPJ
-                        <input name="cnpj" type="text" readonly value="${helpers.escapeHtml(state.salesDraft.cnpj)}" />
-                      </label>
-                      <label>
-                        Endereco
-                        <input name="address" type="text" readonly value="${helpers.escapeHtml(state.salesDraft.address)}" />
-                      </label>
-                    </div>
+                    ${
+                      isQuoteDraft
+                        ? `
+                          <input name="cnpj" type="hidden" value="${helpers.escapeHtml(state.salesDraft.cnpj)}" />
+                          <input name="address" type="hidden" value="${helpers.escapeHtml(state.salesDraft.address)}" />
+                          <input name="invoice_number" type="hidden" value="${helpers.escapeHtml(state.salesDraft.invoice_number)}" />
+                          <input name="status" type="hidden" value="quote" />
+                          <input name="contract_number" type="hidden" value="${helpers.escapeHtml(state.salesDraft.contract_number)}" />
+                          <input name="contract_notes" type="hidden" value="${helpers.escapeHtml(state.salesDraft.contract_notes)}" />
+                          <div class="sales-form-row">
+                            <label>
+                              Cliente *
+                              <select name="customer_id" required>
+                                <option value="">Selecione um cliente</option>
+                                ${helpers.renderOptions(customerOptions, state.salesDraft.customer_id)}
+                              </select>
+                            </label>
+                            <label>
+                              Nome
+                              <input type="text" readonly value="${helpers.escapeHtml(selectedCustomer?.name || state.salesDraft.customer_name || "")}" />
+                            </label>
+                            <label>
+                              CNPJ
+                              <input type="text" readonly value="${helpers.escapeHtml(selectedCustomerMetadata.document === "-" ? "" : selectedCustomerMetadata.document || state.salesDraft.cnpj)}" />
+                            </label>
+                          </div>
+                          <div class="sales-form-row">
+                            <label>
+                              IE
+                              <input type="text" readonly value="${helpers.escapeHtml(selectedCustomerMetadata.state_registration || "")}" />
+                            </label>
+                            <label>
+                              Endereço
+                              <input type="text" readonly value="${helpers.escapeHtml(selectedCustomerMetadata.address || state.salesDraft.address)}" />
+                            </label>
+                            <label>
+                              Telefone
+                              <input type="text" readonly value="${helpers.escapeHtml(selectedCustomerMetadata.phone || "")}" />
+                            </label>
+                            <label>
+                              Contato
+                              <input type="text" readonly value="${helpers.escapeHtml(selectedCustomerMetadata.contact || "")}" />
+                            </label>
+                          </div>
+                          <div class="sales-form-row">
+                            <label>
+                              Data do Orçamento *
+                              <input name="sale_date" type="date" required value="${helpers.escapeHtml(state.salesDraft.sale_date)}" />
+                            </label>
+                            <label>
+                              Validade *
+                              <input name="delivery_date" type="date" required value="${helpers.escapeHtml(state.salesDraft.delivery_date)}" />
+                            </label>
+                            <input name="payment_method" type="hidden" value="${helpers.escapeHtml(state.salesDraft.payment_method)}" />
+                          </div>
+                        `
+                        : `
+                          <div class="sales-form-row">
+                            <label>
+                              Cliente *
+                              <select name="customer_id" required>
+                                <option value="">Selecione um cliente</option>
+                                ${helpers.renderOptions(customerOptions, state.salesDraft.customer_id)}
+                              </select>
+                            </label>
+                            <label>
+                              CNPJ
+                              <input name="cnpj" type="text" readonly value="${helpers.escapeHtml(state.salesDraft.cnpj)}" />
+                            </label>
+                            <label>
+                              Endereço
+                              <input name="address" type="text" readonly value="${helpers.escapeHtml(state.salesDraft.address)}" />
+                            </label>
+                          </div>
 
-                    <div class="sales-form-row">
-                      <label>
-                        No Nota Fiscal
-                        <input name="invoice_number" type="text" placeholder="NF-0001" value="${helpers.escapeHtml(state.salesDraft.invoice_number)}" />
-                      </label>
-                      <label>
-                        Data da Venda *
-                        <input name="sale_date" type="date" required value="${helpers.escapeHtml(state.salesDraft.sale_date)}" />
-                      </label>
-                      <label>
-                        Data de Entrega *
-                        <input name="delivery_date" type="date" required value="${helpers.escapeHtml(state.salesDraft.delivery_date)}" />
-                      </label>
-                      <label>
-                        Pagamento
-                        <select name="payment_method">
-                          ${helpers.renderOptions([
-                            { value: "", label: "Selecione" },
-                            { value: "boleto", label: "Boleto" },
-                            { value: "pix", label: "Pix" },
-                            { value: "transferencia", label: "Transferencia" },
-                            { value: "cartao", label: "Cartao" },
-                            { value: "dinheiro", label: "Dinheiro" },
-                            { value: "cheque", label: "Cheque" },
-                            { value: "negociado_com_o_dono", label: "Negociado com o dono" },
-                          ], state.salesDraft.payment_method)}
-                        </select>
-                      </label>
-                    </div>
+                          <div class="sales-form-row">
+                            <label>
+                              Nº da nota fiscal
+                              <input name="invoice_number" type="text" placeholder="Opcional" value="${helpers.escapeHtml(state.salesDraft.invoice_number)}" />
+                            </label>
+                            <label>
+                              Data da Venda *
+                              <input name="sale_date" type="date" required value="${helpers.escapeHtml(state.salesDraft.sale_date)}" />
+                            </label>
+                            <label>
+                              Data de Entrega *
+                              <input name="delivery_date" type="date" required readonly value="${helpers.escapeHtml(calculatedDeliveryDate || "")}" />
+                            </label>
+                            <input name="payment_method" type="hidden" value="${helpers.escapeHtml(state.salesDraft.payment_method)}" />
+                          </div>
 
-                    <div class="sales-form-row">
-                      <label>
-                        Status da venda *
-                        <select name="status" required>
-                          ${helpers.renderOptions([
-                            { value: "quote", label: "Orcamento" },
-                            { value: "finalized", label: "Venda Finalizada" },
-                          ], state.salesDraft.status)}
-                        </select>
-                      </label>
-                      <label>
-                        Contrato de venda
-                        <input name="contract_number" type="text" readonly placeholder="Gerado automaticamente" value="${helpers.escapeHtml(state.salesDraft.contract_number)}" />
-                      </label>
-                    </div>
+                          <div class="sales-form-row">
+                            <label>
+                              Status da venda *
+                              <select name="status" required>
+                                ${helpers.renderOptions([
+                                  { value: "quote", label: "Orçamento" },
+                                  { value: "finalized", label: "Venda Finalizada" },
+                                ], state.salesDraft.status)}
+                              </select>
+                            </label>
+                            <label>
+                              Contrato de venda
+                              <input name="contract_number" type="text" readonly placeholder="Gerado automaticamente" value="${helpers.escapeHtml(state.salesDraft.contract_number)}" />
+                            </label>
+                            <label>
+                              Prioridade da venda
+                              <select name="priority">
+                                ${helpers.renderOptions([
+                                  { value: "baixa", label: "Baixa" },
+                                  { value: "media", label: "Média" },
+                                  { value: "alta", label: "Alta" },
+                                  { value: "urgente", label: "Urgente" },
+                                ], state.salesDraft.priority || "media")}
+                              </select>
+                            </label>
+                          </div>
+                          <div class="sales-form-row">
+                            <label>
+                              Prazo de entrega (dias) *
+                              <input name="delivery_days" type="number" min="1" step="1" required value="${helpers.escapeHtml(state.salesDraft.delivery_days || "")}" />
+                            </label>
+                            <label>
+                              Data prevista
+                              <input data-sales-delivery-date-preview type="text" readonly value="${helpers.escapeHtml(calculatedDeliveryDate ? helpers.formatDate(calculatedDeliveryDate) : "")}" />
+                            </label>
+                          </div>
+                        `
+                    }
 
                     <div class="sales-items-panel">
                       <div class="sales-items-header">
@@ -733,6 +1204,10 @@ export default {
                           <span>Desconto</span>
                           <strong data-sales-total="discount">${helpers.formatCurrency(totals.discount)}</strong>
                         </article>
+                        <article class="sales-total-card">
+                          <span>Desconto Pix</span>
+                          <strong data-sales-total="paymentDiscount">${helpers.formatCurrency(totals.paymentDiscount || 0)}</strong>
+                        </article>
                         <article class="sales-total-card sales-total-card-primary">
                           <span>Total final</span>
                           <strong data-sales-total="total">${helpers.formatCurrency(totals.total)}</strong>
@@ -740,23 +1215,31 @@ export default {
                       </div>
                     </div>
 
-                    <div class="sales-form-row sales-form-row-full">
-                      <label>
-                        Observacoes
-                        <textarea name="contract_notes" placeholder="Observacoes da venda">${helpers.escapeHtml(state.salesDraft.contract_notes)}</textarea>
-                      </label>
-                    </div>
+                    ${renderSalesPaymentConditionsPanel(state, helpers, totals)}
+
+                    ${
+                      isQuoteDraft
+                        ? ""
+                        : `
+                          <div class="sales-form-row sales-form-row-full">
+                            <label>
+                              Observações
+                              <textarea name="contract_notes" placeholder="Observações da venda">${helpers.escapeHtml(state.salesDraft.contract_notes)}</textarea>
+                            </label>
+                          </div>
+                        `
+                    }
 
                     <div class="form-actions-row sales-form-actions">
                       <button class="ghost-button" type="button" data-sales-cancel>Cancelar</button>
-                      <button class="secondary-button" type="button" data-sales-draft-preview="${state.salesDraft.status}">Gerar previa</button>
+                      <button class="secondary-button" type="button" data-sales-draft-preview="${state.salesDraft.status}">Gerar prévia</button>
                       <button class="primary-button" type="submit">Salvar</button>
                     </div>
                   </form>
                 </div>
               </div>
             `
-            : `<div class="empty-state">Seu perfil pode visualizar este modulo, mas nao pode editar.</div>`
+            : `<div class="empty-state">Seu perfil pode visualizar este módulo, mas não pode editar.</div>`
         }
 
         ${
@@ -784,7 +1267,7 @@ export default {
                         <input name="cnpj" type="text" readonly value="${helpers.escapeHtml(state.salesContractDraft.cnpj)}" />
                       </label>
                       <label>
-                        Endereco
+                        Endereço
                         <input name="address" type="text" readonly value="${helpers.escapeHtml(state.salesContractDraft.address)}" />
                       </label>
                       <label>
@@ -804,11 +1287,11 @@ export default {
                       </label>
                       <label>
                         Pagamento
-                        <input name="payment_method" type="text" readonly value="${helpers.escapeHtml(helpers.getPaymentMethodLabel(state.salesContractDraft.payment_method))}" />
+                        <input name="payment_method" type="text" readonly value="${helpers.escapeHtml(state.salesContractDraft.payment_method)}" />
                       </label>
                       <label>
                         Status
-                        <input name="status_label" type="text" readonly value="${helpers.escapeHtml(state.salesContractDraft.status === "finalized" ? "Venda Finalizada" : "Orcamento")}" />
+                        <input name="status_label" type="text" readonly value="${helpers.escapeHtml(state.salesContractDraft.status === "finalized" ? "Venda Finalizada" : "Orçamento")}" />
                       </label>
                     </div>
 
@@ -832,8 +1315,8 @@ export default {
 
                     <div class="sales-form-row sales-form-row-full">
                       <label>
-                        Observacoes do contrato
-                        <textarea name="contract_notes" placeholder="Clausulas, observacoes e detalhes do contrato">${helpers.escapeHtml(state.salesContractDraft.contract_notes)}</textarea>
+                        Observações do contrato
+                        <textarea name="contract_notes" placeholder="Cláusulas, observações e detalhes do contrato">${helpers.escapeHtml(state.salesContractDraft.contract_notes)}</textarea>
                       </label>
                     </div>
 
@@ -859,7 +1342,7 @@ export default {
             <select id="sales-status-filter">
               ${helpers.renderOptions([
                 { value: "all", label: "Todos" },
-                { value: "quote", label: "Orcamento" },
+                { value: "quote", label: "Orçamento" },
                 { value: "finalized", label: "Venda Finalizada" },
               ], state.salesStatusFilter)}
             </select>
@@ -879,7 +1362,7 @@ export default {
                       <th>Pagamento</th>
                       <th>Status</th>
                       <th>Total</th>
-                      <th>Acoes</th>
+                      <th>Ações</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -938,6 +1421,18 @@ export default {
       salesForm.addEventListener("submit", helpers.handleSalesSubmit);
       salesForm.addEventListener("input", () => helpers.syncSalesDraftFromForm(salesForm));
       salesForm.addEventListener("change", () => helpers.syncSalesDraftFromForm(salesForm));
+      ["click", "dblclick"].forEach((eventName) => {
+        salesForm.addEventListener(eventName, (event) => {
+          const trigger = event.target.closest("[data-sales-open-product-picker]");
+          if (!trigger || !salesForm.contains(trigger)) return;
+          event.preventDefault();
+          openSalesProductPickerForItem({
+            itemIndex: Number(trigger.dataset.salesOpenProductPicker),
+            state,
+            helpers,
+          });
+        });
+      });
     }
 
     document.querySelector("[data-sales-cancel]")?.addEventListener("click", () => {
@@ -957,9 +1452,28 @@ export default {
       helpers.renderActiveModule();
     });
 
-    document.querySelector("[data-sales-add-item]")?.addEventListener("click", () => {
-      state.salesDraft.items.push(helpers.createEmptySalesItemDraft());
+    document.querySelector('#sales-form input[name="delivery_days"]')?.addEventListener("input", () => {
+      helpers.syncSalesDraftFromForm(salesForm);
+      const preview = salesForm.querySelector("[data-sales-delivery-date-preview]");
+      if (preview) {
+        const deliveryDate = state.salesDraft.sale_date && state.salesDraft.delivery_days
+          ? helpers.addDaysToIsoDate(state.salesDraft.sale_date, state.salesDraft.delivery_days)
+          : "";
+        preview.value = deliveryDate ? helpers.formatDate(deliveryDate) : "";
+      }
+    });
+
+    document.querySelector('#sales-form input[name="sale_date"]')?.addEventListener("change", () => {
+      helpers.syncSalesDraftFromForm(salesForm);
       helpers.renderActiveModule();
+    });
+
+    document.querySelector("[data-sales-add-item]")?.addEventListener("click", async () => {
+      helpers.syncSalesDraftFromForm(salesForm);
+      const previousScrollY = window.scrollY;
+      state.salesDraft.items.push(helpers.createEmptySalesItemDraft());
+      await helpers.renderActiveModule();
+      window.scrollTo({ top: previousScrollY, left: 0, behavior: "auto" });
     });
 
     document.querySelectorAll("[data-sales-remove-item]").forEach((button) => {
@@ -976,6 +1490,35 @@ export default {
     document.querySelectorAll("[data-sales-item-field]").forEach((field) => {
       field.addEventListener("change", helpers.handleSalesItemFieldChange);
       field.addEventListener("input", helpers.handleSalesItemFieldChange);
+    });
+
+    document.querySelector("[data-sales-add-payment]")?.addEventListener("click", async () => {
+      helpers.syncSalesDraftFromForm(salesForm);
+      state.salesDraft.payment_conditions.push(helpers.createEmptySalesPaymentCondition());
+      await helpers.renderActiveModule();
+    });
+
+    document.querySelectorAll("[data-sales-remove-payment]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        helpers.syncSalesDraftFromForm(salesForm);
+        if (state.salesDraft.payment_conditions.length <= 1) {
+          state.salesDraft.payment_conditions = [helpers.createEmptySalesPaymentCondition()];
+        } else {
+          state.salesDraft.payment_conditions.splice(Number(button.dataset.salesRemovePayment), 1);
+        }
+        await helpers.renderActiveModule();
+      });
+    });
+
+    document.querySelectorAll("[data-sales-payment-field]").forEach((field) => {
+      field.addEventListener("input", () => {
+        helpers.syncSalesDraftFromForm(salesForm);
+        helpers.updateSalesDraftAmountDisplays();
+      });
+      field.addEventListener("change", async () => {
+        helpers.syncSalesDraftFromForm(salesForm);
+        await helpers.renderActiveModule();
+      });
     });
 
     document.querySelectorAll("[data-sales-edit-id], [data-sales-view-id]").forEach((button) => {
@@ -1021,7 +1564,7 @@ export default {
           if (error) throw error;
           await helpers.loadTable("sales", "sales");
           helpers.renderActiveModule();
-          helpers.showToast("Venda excluida com sucesso.", "success");
+          helpers.showToast("Venda excluída com sucesso.", "success");
         } catch (error) {
           helpers.showToast(helpers.formatError(error), "danger");
         }
@@ -1033,15 +1576,23 @@ export default {
         const sale = state.moduleData.sales.find((item) => item.id === button.dataset.salesFinalizeId);
         if (!sale) return;
 
-        try {
-          await helpers.finalizeSaleRecord(sale);
-          await helpers.loadTable("sales", "sales");
-          await helpers.loadTable("production_orders", "production");
-          helpers.renderActiveModule();
-          helpers.showToast("Venda finalizada e enviada para producao.", "success");
-        } catch (error) {
-          helpers.showToast(helpers.formatError(error), "danger");
-        }
+        state.salesDraft = helpers.hydrateSalesDraft(sale);
+        state.salesDraft.status = "finalized";
+        state.salesDraft.sale_date = new Date().toISOString().slice(0, 10);
+        state.salesDraft.delivery_days = "";
+        state.salesDraft.delivery_date = "";
+        state.openAccordionKey = "sales-form";
+        helpers.renderActiveModule();
+        document.querySelector("#sales-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        helpers.showToast("Defina prazo e prioridade para finalizar a venda. A nota fiscal agora é opcional.", "warning");
+      });
+    });
+
+    document.querySelectorAll("[data-sales-send-production-id]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const sale = state.moduleData.sales.find((item) => item.id === button.dataset.salesSendProductionId);
+        if (!sale) return;
+        await helpers.sendSaleToProduction(sale);
       });
     });
 

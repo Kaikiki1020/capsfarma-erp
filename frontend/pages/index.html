@@ -12,19 +12,19 @@
       href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./styles.css?v=20260411-1" />
-    <link rel="stylesheet" href="./service-orders.css?v=20260409-1" />
-    <script src="./supabase/config.js?v=20260409-3"></script>
+    <link rel="stylesheet" href="./service-orders.css?v=20260430-one-click-picker" />
+    <link rel="stylesheet" href="./styles.css?v=20260505-inventory-product-picker" />
+    <script src="./supabase/config.js?v=20260428-1"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script defer src="./service-orders.js?v=20260409-1"></script>
-    <script defer src="./app.js?v=20260411-2"></script>
+    <script defer src="./service-orders.js?v=20260504-purchase-stock-entry"></script>
+    <script defer src="./app.js?v=20260505-product-category-free-text"></script>
   </head>
   <body>
     <div id="auth-bootstrap-overlay" class="auth-bootstrap-overlay" aria-live="polite" aria-busy="true">
       <div class="auth-bootstrap-card">
         <div class="auth-bootstrap-spinner" aria-hidden="true"></div>
         <strong>Carregando ERP</strong>
-        <p id="auth-bootstrap-message">Validando sessao...</p>
+        <p id="auth-bootstrap-message">Validando sessão...</p>
       </div>
     </div>
 
@@ -96,29 +96,29 @@
                   <p class="auth-kicker">ERP Corporativo</p>
                   <h2 id="auth-brand-title">Bem-vindo ao ERP CAPSFARMA</h2>
                   <p id="auth-brand-subtitle" class="auth-showcase-copy">
-                    Gerencie sua operacao com seguranca, agilidade e controle em tempo real.
+                    Gerencie sua operação com segurança, agilidade e controle em tempo real.
                   </p>
                 </div>
 
                 <div class="auth-feature-list">
                   <article class="auth-feature-card">
-                    <strong>Seguranca</strong>
-                    <span>Autenticacao protegida e acesso controlado por perfil.</span>
+                    <strong>Segurança</strong>
+                    <span>Autenticação protegida e acesso controlado por perfil.</span>
                   </article>
                   <article class="auth-feature-card">
                     <strong>Controle</strong>
-                    <span>Operacao centralizada com rastreabilidade e visao clara.</span>
+                    <span>Operação centralizada com rastreabilidade e visao clara.</span>
                   </article>
                   <article class="auth-feature-card">
                     <strong>Performance</strong>
-                    <span>Fluxo rapido para equipes administrativas, comerciais e tecnicas.</span>
+                    <span>Fluxo rápido para equipes administrativas, comerciais e técnicas.</span>
                   </article>
                 </div>
 
                 <div class="auth-showcase-footer">
                   <div class="auth-status">
                     <span class="status-dot auth-status-dot"></span>
-                    <span id="auth-connection-status">Supabase nao configurado</span>
+                    <span id="auth-connection-status">Supabase não configurado</span>
                   </div>
                   <span id="auth-copyright">© 2026 CAPSFARMA. Todos os direitos reservados.</span>
                 </div>
@@ -138,7 +138,7 @@
 
                   <form id="login-form" class="form-panel auth-login-form">
                     <label class="auth-field">
-                      <span>Cod Usuario</span>
+                      <span>Cod Usuário</span>
                       <span class="input-shell">
                         <span class="input-icon" aria-hidden="true">⌘</span>
                         <input
@@ -194,14 +194,14 @@
             </div>
 
             <div class="topbar-actions">
-              <button class="topbar-icon-button" type="button" aria-label="Notificacoes">
+              <button class="topbar-icon-button" type="button" aria-label="Notificações">
                 <span>◔</span>
               </button>
               <div class="topbar-avatar" aria-hidden="true">
                 <span id="user-avatar-label">U</span>
               </div>
               <div class="user-badge">
-                <span id="user-role-label">Usuario</span>
+                <span id="user-role-label">Usuário</span>
                 <strong id="user-name-label">-</strong>
               </div>
             </div>
@@ -225,9 +225,26 @@
         <div id="auth-feedback-icon" class="auth-feedback-icon" aria-hidden="true">!</div>
         <div class="auth-feedback-copy">
           <p id="auth-feedback-title" class="auth-feedback-title">Erro</p>
-          <p id="auth-feedback-message" class="auth-feedback-message">Usuario ou senha invalidos.</p>
+          <p id="auth-feedback-message" class="auth-feedback-message">Usuário ou senha invalidos.</p>
         </div>
         <button id="auth-feedback-close" class="primary-button auth-feedback-button" type="button">OK</button>
+      </div>
+    </div>
+
+    <div id="app-feedback-modal" class="modal-overlay app-feedback-modal hidden" aria-hidden="true">
+      <div
+        class="modal-card app-feedback-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="app-feedback-title"
+        aria-describedby="app-feedback-message"
+      >
+        <div id="app-feedback-icon" class="app-feedback-icon" aria-hidden="true">!</div>
+        <div class="app-feedback-copy">
+          <p id="app-feedback-title" class="app-feedback-title">Aviso</p>
+          <p id="app-feedback-message" class="app-feedback-message">Preencha os campos obrigatórios.</p>
+        </div>
+        <button id="app-feedback-close" class="primary-button app-feedback-button" type="button">OKAY</button>
       </div>
     </div>
   </body>

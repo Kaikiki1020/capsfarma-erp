@@ -1,5 +1,5 @@
 const DEFAULT_SUPABASE_CONFIG = {
-  url: `${window.location.protocol === "https:" ? "https:" : "http:"}//${window.location.hostname || "127.0.0.1"}:54321`,
+  url: `${window.location.origin || "http://127.0.0.1"}/supabase`,
   anonKey: "sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH",
 };
 const SUPABASE_CONFIG = {
@@ -8,13 +8,31 @@ const SUPABASE_CONFIG = {
 };
 const MACHINING_STORAGE_KEY = "capsfarma_machining_data";
 const SALES_DOCUMENT_SETTINGS_STORAGE_KEY = "capsfarma_sales_document_settings";
+const SALES_TEMPLATE_PDF_MAX_SIZE = 2 * 1024 * 1024;
+const PRODUCT_PHOTO_MAX_SOURCE_SIZE = 8 * 1024 * 1024;
+const PRODUCT_PHOTO_MAX_STORED_SIZE = 700 * 1024;
+const PRODUCT_PHOTO_MAX_DIMENSION = 720;
+const PRODUCT_SALE_OPTION_SEPARATOR = ";";
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "capsfarma_sidebar_collapsed";
 const CLIENT_IP_STORAGE_KEY = "capsfarma_client_ip";
 const SESSION_STORAGE_KEY = "capsfarma_session";
+const PRODUCTION_OPERATION_CONFIG_STORAGE_KEY = "capsfarma_production_operation_steps";
 const LOGIN_MAX_ATTEMPTS = 5;
 const SIDEBAR_MOBILE_BREAKPOINT = 1180;
+const PRODUCTION_ORDER_NUMBER_RETRY_LIMIT = 5;
+const DEFAULT_PRODUCTION_OPERATION_STEPS = [
+  { name: "Projeto técnico", estimated_minutes: 240 },
+  { name: "Corte / Usinagem", estimated_minutes: 480 },
+  { name: "Solda", estimated_minutes: 360 },
+  { name: "Montagem estrutural", estimated_minutes: 420 },
+  { name: "Elétrica / Painel", estimated_minutes: 360 },
+  { name: "Testes", estimated_minutes: 240 },
+  { name: "Acabamento", estimated_minutes: 180 },
+  { name: "Embalagem", estimated_minutes: 120 },
+  { name: "Expedição", estimated_minutes: 90 },
+];
 const DEFAULT_BRAND_LOGO_PATH = "./assets/branding/logo-empresa.png";
-const AUTH_SESSION_INVALID_MESSAGE = "Sua sessao expirou ou nao e mais valida. Faca login novamente.";
+const AUTH_SESSION_INVALID_MESSAGE = "Sua sessão expirou ou não é mais válida. Faça login novamente.";
 const NOTIFICATION_SOUND_PATHS = {
   created: "./assets/sounds/notification-created.wav",
   approved: "./assets/sounds/notification-approved.wav",
@@ -30,33 +48,36 @@ const notificationAudio = {
   filePlayers: {},
   unlockBound: false,
 };
+let productionOrderNumberCounter = 0;
 const MODULES = [
   { key: "dashboard", label: "Dashboard", tooltip: "Dashboard", icon: "◫" },
   { key: "products", label: "Produtos", tooltip: "Produtos", icon: "◪" },
   { key: "bom", label: "Estrutura (BOM)", tooltip: "BOM", icon: "⊞" },
   { key: "inventory", label: "Estoque", tooltip: "Estoque", icon: "◬" },
-  { key: "production", label: "Producao", tooltip: "Producao", icon: "◭" },
-  { key: "service_orders", label: "Ordem de Servico", tooltip: "Ordem de Servico", icon: "▣" },
+  { key: "production", label: "Produção", tooltip: "Produção", icon: "◭" },
+  { key: "service_orders", label: "Ordem de Serviço", tooltip: "Ordem de Serviço", icon: "▣" },
   { key: "machining", label: "Usinagem", tooltip: "Usinagem", icon: "◈" },
   { key: "customers", label: "Clientes", tooltip: "Clientes", icon: "◎" },
   { key: "sales", label: "Vendas", tooltip: "Vendas", icon: "◨" },
   { key: "purchases", label: "Compras", tooltip: "Compras", icon: "◧" },
-  { key: "reports", label: "Relatorios", tooltip: "Relatorios", icon: "◲" },
-  { key: "permissions", label: "Permissoes", tooltip: "Permissoes", icon: "◩" },
+  { key: "payables", label: "Contas a Pagar", tooltip: "Contas a Pagar", icon: "◫" },
+  { key: "reports", label: "Relatórios", tooltip: "Relatórios", icon: "◲" },
+  { key: "permissions", label: "Permissões", tooltip: "Permissões", icon: "◩" },
   { key: "vps", label: "Controle da VPS", tooltip: "Controle VPS", icon: "▤" },
   { key: "audit", label: "Auditoria", tooltip: "Central de Logs", icon: "◰" },
 ];
 const MODULE_IMPORT_PATHS = {
   dashboard: "../../modules/dashboard/index.js",
-  products: "../../modules/produtos/index.js",
-  bom: "../../modules/bom/index.js",
-  inventory: "../../modules/estoque/index.js",
-  production: "../../modules/producao/index.js",
+  products: "../../modules/produtos/index.js?v=20260430-one-click-picker",
+  bom: "../../modules/bom/index.js?v=20260430-final-product-picker",
+  inventory: "../../modules/estoque/index.js?v=20260505-inventory-product-picker",
+  production: "../../modules/producao/index.js?v=20260429-3",
   service_orders: "../../modules/ordem-servico/index.js",
-  machining: "../../modules/usinagem/index.js",
-  customers: "../../modules/clientes/index.js",
-  sales: "../../modules/vendas/index.js",
-  purchases: "../../modules/compras/index.js",
+  machining: "../../modules/usinagem/index.js?v=20260505-machining-machines",
+  customers: "../../modules/clientes/index.js?v=20260424-2",
+  sales: "../../modules/vendas/index.js?v=20260430-one-click-picker",
+  purchases: "../../modules/compras/index.js?v=20260504-purchase-stock-entry",
+  payables: "../../modules/contas-pagar/index.js",
   reports: "../../modules/relatorios/index.js",
   permissions: "../../modules/permissoes/index.js",
   vps: "../../modules/controle-vps/index.js",
@@ -82,16 +103,19 @@ const state = {
     inventory: [],
     production: [],
     serviceOrders: [],
+    serviceOrderChecklists: [],
     machiningPieces: [],
     customers: [],
     sales: [],
     purchases: [],
+    payables: [],
     users: [],
     auditLogs: [],
   },
   activeModule: "dashboard",
   bomTab: "materials",
   bomMaterialSearch: "",
+  bomStructureSearch: "",
   bomMaterialFormVisible: false,
   bomStructureFormVisible: false,
   bomStructureDraft: createEmptyBomStructureDraft(),
@@ -104,13 +128,23 @@ const state = {
   productMovementId: null,
   productionSearch: "",
   productionStatusFilter: "all",
+  productionSelectedOrderId: "",
+  productionDashboardTab: "operations",
+  productionFocusOrderId: "",
+  productionOperationConfigDraft: createProductionOperationConfigDraft(),
   machiningSearch: "",
   machiningStatusFilter: "all",
+  machiningTab: "production",
   openAccordionKey: null,
   productionDraft: createEmptyProductionDraft(),
+  serviceOrdersTab: "orders",
   serviceOrderDraft: createEmptyServiceOrderDraft(),
+  serviceOrderFormTab: "details",
   serviceOrderFilters: createEmptyServiceOrderFilters(),
   serviceOrderSelectedId: "",
+  serviceOrderChecklistDraft: createEmptyServiceOrderChecklistDraft(),
+  serviceOrderChecklistFilters: createEmptyServiceOrderChecklistFilters(),
+  serviceOrderChecklistSelectedId: "",
   machiningDraft: createEmptyMachiningDraft(),
   machiningStartDraft: createEmptyMachiningStartDraft(),
   customerSearch: "",
@@ -127,13 +161,23 @@ const state = {
   purchaseStatusFilter: "all",
   purchaseDraft: createEmptyPurchaseDraft(),
   purchaseConclusionDraft: createEmptyPurchaseConclusionDraft(),
+  payablesFilters: createEmptyPayablesFilters(),
+  payablesDraft: createEmptyPayableDraft(),
+  payablesPaymentDraft: createEmptyPayablePaymentDraft(),
+  payablesAlertState: createEmptyPayablesAlertState(),
+  payablesSelectedId: "",
+  payablesExpandedGroups: {},
   notifications: [],
   auditFilters: createEmptyAuditFilters(),
   auditSelectedLogId: "",
   reportsFilters: createEmptyReportsFilters(),
   inventoryFormVisible: false,
+  inventoryMovementProductId: "",
+  inventoryMovementSaleOptionId: "",
   lastPurchaseNotificationId: null,
   purchaseChannel: null,
+  productionChannel: null,
+  payableChannel: null,
   serviceOrderChannel: null,
   vpsControl: createEmptyVpsControlState(),
   dashboardRange: "30d",
@@ -189,6 +233,11 @@ const elements = {
   authFeedbackTitle: document.querySelector("#auth-feedback-title"),
   authFeedbackMessage: document.querySelector("#auth-feedback-message"),
   authFeedbackClose: document.querySelector("#auth-feedback-close"),
+  appFeedbackModal: document.querySelector("#app-feedback-modal"),
+  appFeedbackIcon: document.querySelector("#app-feedback-icon"),
+  appFeedbackTitle: document.querySelector("#app-feedback-title"),
+  appFeedbackMessage: document.querySelector("#app-feedback-message"),
+  appFeedbackClose: document.querySelector("#app-feedback-close"),
 };
 
 let activeModuleRenderFrame = 0;
@@ -250,6 +299,40 @@ function bindDeferredSelectFilter(selector, assignValue) {
   });
 }
 
+function getModuleFocusSnapshot() {
+  const activeElement = document.activeElement;
+  if (!activeElement || !elements.moduleContainer?.contains(activeElement)) {
+    return null;
+  }
+
+  const selector = activeElement.id ? `#${CSS.escape(activeElement.id)}` : "";
+  if (!selector || !/^(INPUT|TEXTAREA|SELECT)$/.test(activeElement.tagName)) {
+    return null;
+  }
+
+  return {
+    selector,
+    selectionStart: typeof activeElement.selectionStart === "number" ? activeElement.selectionStart : null,
+    selectionEnd: typeof activeElement.selectionEnd === "number" ? activeElement.selectionEnd : null,
+  };
+}
+
+function restoreModuleFocusSnapshot(snapshot) {
+  if (!snapshot?.selector) return;
+
+  const nextElement = elements.moduleContainer.querySelector(snapshot.selector);
+  if (!nextElement) return;
+
+  nextElement.focus({ preventScroll: true });
+  if (
+    typeof nextElement.setSelectionRange === "function"
+    && typeof snapshot.selectionStart === "number"
+    && typeof snapshot.selectionEnd === "number"
+  ) {
+    nextElement.setSelectionRange(snapshot.selectionStart, snapshot.selectionEnd);
+  }
+}
+
 function init() {
   loadSalesDocumentSettings();
   renderAuthBranding();
@@ -280,6 +363,13 @@ function attachEvents() {
       closeAuthFeedbackModal();
     }
   });
+  elements.appFeedbackClose?.addEventListener("click", closeAppFeedbackModal);
+  elements.appFeedbackModal?.addEventListener("click", (event) => {
+    if (event.target === elements.appFeedbackModal) {
+      closeAppFeedbackModal();
+    }
+  });
+  document.addEventListener("invalid", handleInvalidFormField, true);
 }
 
 function attachGlobalErrorHandlers() {
@@ -295,13 +385,15 @@ function attachGlobalErrorHandlers() {
 }
 
 function renderLandingConnectionState(isConnected) {
-  elements.authConnectionStatus.textContent = isConnected ? "Ambiente conectado" : "Ambiente aguardando configuracao";
+  elements.authConnectionStatus.textContent = isConnected ? "Ambiente conectado" : "Ambiente aguardando configuração";
   elements.authStatusDot.classList.toggle("online", isConnected);
 }
 
 function syncAppMode() {
-  elements.body.classList.toggle("auth-mode", elements.authScreen.classList.contains("active"));
-  if (elements.authScreen.classList.contains("active")) {
+  const isAuthActive = elements.authScreen.classList.contains("active");
+  elements.body.classList.toggle("auth-mode", isAuthActive);
+  elements.body.classList.toggle("app-mode", elements.appScreen.classList.contains("active"));
+  if (isAuthActive) {
     setSidebarOpen(false);
   }
 }
@@ -391,7 +483,7 @@ function renderAuthBranding() {
   const company = state.salesDocumentSettings?.company || {};
   const companyName = String(company.company_name || "CAPSFARMA").trim() || "CAPSFARMA";
   const monogram = getCompanyMonogram(companyName);
-  const loginReadyMessage = `Gerencie a operacao da ${companyName} com seguranca, agilidade e controle em tempo real.`;
+  const loginReadyMessage = `Gerencie a operação da ${companyName} com segurança, agilidade e controle em tempo real.`;
   const resolvedLogo = String(company.logo || "").trim() || DEFAULT_BRAND_LOGO_PATH;
 
   elements.authBrandTitle.textContent = `Bem-vindo ao ERP ${companyName}`;
@@ -423,7 +515,7 @@ function getCompanyMonogram(companyName) {
 
 function handleForgotPassword() {
   showToast(
-    "Para redefinir sua senha, solicite a alteracao ao ADMINISTRADOR ou ao time de TI no cadastro de funcionarios.",
+    "Para redefinir sua senha, solicite a alteração ao ADMINISTRADOR ou ao time de TI no cadastro de funcionários.",
     "warning"
   );
 }
@@ -465,7 +557,7 @@ function applyRequestedModuleFromHash() {
   if (!MODULES.some((module) => module.key === requested)) return;
   if (requested === "vps" && !isTiUser()) {
     state.activeModule = "dashboard";
-    showToast("Acesso nao autorizado", "danger");
+    showToast("Acesso não autorizado", "danger");
     return;
   }
   state.activeModule = requested;
@@ -500,7 +592,7 @@ function formatShortId(value) {
   return String(hash).padStart(5, "0");
 }
 
-function setAuthBootstrapLoading(isLoading, message = "Validando sessao...") {
+function setAuthBootstrapLoading(isLoading, message = "Validando sessão...") {
   state.authBootstrapPending = Boolean(isLoading);
   elements.body.classList.toggle("bootstrap-loading", state.authBootstrapPending);
   elements.authBootstrapOverlay?.classList.toggle("hidden", !state.authBootstrapPending);
@@ -522,16 +614,45 @@ function readPersistedSession() {
   }
 }
 
+function decodeJwtPayloadSegment(segment) {
+  const normalized = String(segment || "").replace(/-/g, "+").replace(/_/g, "/");
+  if (!normalized) return null;
+
+  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+
+  try {
+    return JSON.parse(atob(padded));
+  } catch {
+    return null;
+  }
+}
+
+function hasUsableAccessToken(token) {
+  const normalizedToken = String(token || "").trim();
+  if (!normalizedToken) return false;
+
+  const parts = normalizedToken.split(".");
+  if (parts.length !== 3) return false;
+
+  const payload = decodeJwtPayloadSegment(parts[1]);
+  if (!payload || typeof payload !== "object") return false;
+
+  const expiresAt = Number(payload.exp || 0);
+  if (!Number.isFinite(expiresAt) || expiresAt <= 0) return false;
+
+  return expiresAt > Math.floor(Date.now() / 1000);
+}
+
 function isAuthenticationError(error) {
   const message = String(error?.message || error || "").toLowerCase();
   return [
     "token jwt ausente",
     "token jwt invalido",
     "token jwt expirado",
-    "sessao invalida",
-    "sessao expirada",
-    "usuario inativo",
-    "nao autenticado",
+    "sessão inválida",
+    "sessão expirada",
+    "usuário inativo",
+    "não autenticado",
     "unauthorized",
     "401",
   ].some((fragment) => message.includes(fragment));
@@ -554,7 +675,7 @@ function handleAuthenticationFailure(error, { showMessage = false } = {}) {
 
 async function bootstrapApplication() {
   const perf = startPerfMeasure("bootstrapApplication");
-  setAuthBootstrapLoading(true, "Validando sessao...");
+  setAuthBootstrapLoading(true, "Validando sessão...");
 
   if (!hasSupabaseConfig()) {
     renderLandingConnectionState(false);
@@ -582,6 +703,12 @@ async function bootstrapApplication() {
     return;
   }
 
+  if (!hasUsableAccessToken(session.accessToken)) {
+    handleAuthenticationFailure(new Error("Sessão inválida ou expirada"), { showMessage: false });
+    setAuthBootstrapLoading(false);
+    return;
+  }
+
   try {
     state.currentUser = session.user;
     state.accessToken = session.accessToken || "";
@@ -591,16 +718,16 @@ async function bootstrapApplication() {
     setAuthBootstrapLoading(true, "Carregando sistema...");
     showApp();
     await renderApp();
-    void loadSalesDocumentSettingsFromServer()
+    void loadRuntimeSettingsFromServer()
       .then(() => {
         persistSession();
-        if (state.activeModule === "sales") {
+        if (["sales", "production"].includes(state.activeModule)) {
           requestActiveModuleRender();
         }
       })
       .catch((error) => {
         if (!handleAuthenticationFailure(error, { showMessage: true })) {
-          console.error("sales settings bootstrap", error);
+          console.error("runtime settings bootstrap", error);
         }
       });
   } catch (error) {
@@ -618,7 +745,7 @@ async function handleRegister(event) {
   event.preventDefault();
 
   if (!state.supabase) {
-    showToast("Supabase ainda nao foi configurado.", "danger");
+    showToast("Supabase ainda não foi configurado.", "danger");
     return;
   }
 
@@ -635,12 +762,12 @@ async function handleRegister(event) {
     if (error) throw error;
 
     const user = data?.[0];
-    if (!user) throw new Error("Nao foi possivel concluir o cadastro.");
+    if (!user) throw new Error("Não foi possível concluir o cadastro.");
 
     showToast(
       isAdministratorRole(user.role)
-        ? "Primeiro usuario criado como ADMINISTRADOR."
-        : "Usuario cadastrado com sucesso.",
+        ? "Primeiro usuário criado como ADMINISTRADOR."
+        : "Usuário cadastrado com sucesso.",
       "success"
     );
     event.currentTarget?.reset();
@@ -654,7 +781,7 @@ async function handleLogin(event) {
   event.preventDefault();
 
   if (!state.supabase) {
-    showToast("Supabase ainda nao foi configurado.", "danger");
+    showToast("Supabase ainda não foi configurado.", "danger");
     return;
   }
 
@@ -669,7 +796,7 @@ async function handleLogin(event) {
     if (error) throw error;
 
     const user = data?.[0];
-    if (!user) throw new Error("Credenciais invalidas.");
+    if (!user) throw new Error("Credenciais inválidas.");
 
     state.currentUser = user;
     state.accessToken = user.access_token || "";
@@ -677,16 +804,16 @@ async function handleLogin(event) {
     persistSession();
     showApp();
     await renderApp();
-    void loadSalesDocumentSettingsFromServer()
+    void loadRuntimeSettingsFromServer()
       .then(() => {
         persistSession();
-        if (state.activeModule === "sales") {
+        if (["sales", "production"].includes(state.activeModule)) {
           requestActiveModuleRender();
         }
       })
       .catch((error) => {
         if (!handleAuthenticationFailure(error, { showMessage: true })) {
-          console.error("sales settings login", error);
+          console.error("runtime settings login", error);
         }
       });
     showToast("Login realizado com sucesso.", "success");
@@ -700,6 +827,10 @@ async function handleLogin(event) {
 
 async function loadPermissions() {
   const perf = startPerfMeasure("loadPermissions");
+  if (!hasUsableAccessToken(state.accessToken)) {
+    throw new Error("Sessão inválida ou expirada");
+  }
+
   const { data, error } = await state.supabase.rpc("get_my_permissions", {
     p_access_token: state.accessToken,
   });
@@ -726,6 +857,10 @@ function logout({ resetRoute = true } = {}) {
     state.supabase.removeChannel(state.purchaseChannel);
     state.purchaseChannel = null;
   }
+  if (state.payableChannel && state.supabase) {
+    state.supabase.removeChannel(state.payableChannel);
+    state.payableChannel = null;
+  }
   if (state.serviceOrderChannel && state.supabase) {
     state.supabase.removeChannel(state.serviceOrderChannel);
     state.serviceOrderChannel = null;
@@ -746,15 +881,18 @@ function logout({ resetRoute = true } = {}) {
     inventory: [],
     production: [],
     serviceOrders: [],
+    serviceOrderChecklists: [],
     machiningPieces: [],
     customers: [],
     sales: [],
     purchases: [],
+    payables: [],
     users: [],
     auditLogs: [],
   };
   state.bomTab = "materials";
   state.bomMaterialSearch = "";
+  state.bomStructureSearch = "";
   state.bomMaterialFormVisible = false;
   state.bomStructureFormVisible = false;
   state.bomStructureDraft = createEmptyBomStructureDraft();
@@ -765,11 +903,21 @@ function logout({ resetRoute = true } = {}) {
   state.productFormVisible = false;
   state.productionSearch = "";
   state.productionStatusFilter = "all";
+  state.productionSelectedOrderId = "";
+  state.productionDashboardTab = "operations";
+  state.productionFocusOrderId = "";
+  state.productionOperationConfigDraft = createProductionOperationConfigDraft();
+  state.serviceOrdersTab = "orders";
   state.serviceOrderDraft = createEmptyServiceOrderDraft();
+  state.serviceOrderFormTab = "details";
   state.serviceOrderFilters = createEmptyServiceOrderFilters();
   state.serviceOrderSelectedId = "";
+  state.serviceOrderChecklistDraft = createEmptyServiceOrderChecklistDraft();
+  state.serviceOrderChecklistFilters = createEmptyServiceOrderChecklistFilters();
+  state.serviceOrderChecklistSelectedId = "";
   state.machiningSearch = "";
   state.machiningStatusFilter = "all";
+  state.machiningTab = "production";
   state.openAccordionKey = null;
   state.productionDraft = createEmptyProductionDraft();
   state.machiningDraft = createEmptyMachiningDraft();
@@ -784,11 +932,19 @@ function logout({ resetRoute = true } = {}) {
   state.purchaseStatusFilter = "all";
   state.purchaseDraft = createEmptyPurchaseDraft();
   state.purchaseConclusionDraft = createEmptyPurchaseConclusionDraft();
+  state.payablesFilters = createEmptyPayablesFilters();
+  state.payablesDraft = createEmptyPayableDraft();
+  state.payablesPaymentDraft = createEmptyPayablePaymentDraft();
+  state.payablesAlertState = createEmptyPayablesAlertState();
+  state.payablesSelectedId = "";
+  state.payablesExpandedGroups = {};
   state.notifications = [];
   state.auditFilters = createEmptyAuditFilters();
   state.auditSelectedLogId = "";
   state.reportsFilters = createEmptyReportsFilters();
   state.inventoryFormVisible = false;
+  state.inventoryMovementProductId = "";
+  state.inventoryMovementSaleOptionId = "";
   state.vpsControl = createEmptyVpsControlState();
   state.dashboardRange = "30d";
   state.dashboardCustomRange = {
@@ -804,7 +960,7 @@ function logout({ resetRoute = true } = {}) {
   elements.pageTitle.textContent = "Dashboard";
   elements.topbarSubtitle.textContent = "Painel operacional";
   elements.userNameLabel.textContent = "-";
-  elements.userRoleLabel.textContent = "Usuario";
+  elements.userRoleLabel.textContent = "Usuário";
   elements.userAvatarLabel.textContent = "U";
   state.activeModule = "dashboard";
   localStorage.removeItem(SESSION_STORAGE_KEY);
@@ -854,6 +1010,9 @@ async function renderApp() {
     startDashboardAutoRefresh();
     watchPurchaseRequests();
     subscribeToPurchaseNotifications();
+    subscribeToProductionNotifications();
+    watchPayablesAlerts();
+    subscribeToPayableNotifications();
     watchServiceOrders();
     subscribeToServiceOrderNotifications();
   } catch (error) {
@@ -884,9 +1043,9 @@ function renderModuleNav() {
       : state.activeModule === "products"
         ? "Cadastro de Produtos"
           : state.activeModule === "production"
-            ? "Ordens de Producao"
+            ? "Ordens de Produção"
             : state.activeModule === "service_orders"
-              ? "Ordem de Servico"
+              ? "Ordem de Serviço"
             : state.activeModule === "machining"
               ? "Usinagem"
           : state.activeModule === "customers"
@@ -894,15 +1053,15 @@ function renderModuleNav() {
             : state.activeModule === "sales"
               ? "Vendas"
               : state.activeModule === "purchases"
-                ? "Solicitacao de Compras"
+                ? "Solicitação de Compras"
                 : state.activeModule === "vps"
                   ? "Controle da VPS"
                   : state.activeModule === "reports"
-                    ? "Relatorios"
+                    ? "Relatórios"
                   : state.activeModule === "audit"
                     ? "Central de Logs"
                 : state.activeModule === "permissions"
-                  ? "Gerenciamento de Permissoes"
+                  ? "Gerenciamento de Permissões"
         : activeModule?.label || "Dashboard";
   elements.topbarSubtitle.textContent = getModuleSubtitle(state.activeModule);
   syncModuleLocation();
@@ -951,7 +1110,7 @@ async function loadAllVisibleData() {
   const perf = startPerfMeasure("loadAllVisibleData");
   if (!state.supabase) {
     if (hasPermission("service_orders", "view")) {
-      await loadServiceOrdersTable();
+      await Promise.all([loadServiceOrdersTable(), loadServiceOrderChecklistsTable()]);
     }
     loadMachiningData();
     endPerfMeasure(perf, "mode=offline");
@@ -966,21 +1125,37 @@ async function loadAllVisibleData() {
     loaders.push(loadAssignableUsers());
   }
   if (hasPermission("products", "view")) loaders.push(loadProductsTable());
-  if (hasPermission("bom", "view")) loaders.push(loadBomData());
+  if (hasPermission("bom", "view")) {
+    loaders.push(loadBomData());
+    if (!hasPermission("products", "view")) loaders.push(loadProductsTable());
+  }
   if (hasPermission("inventory", "view")) loaders.push(loadInventoryMovementsTable());
-  if (hasPermission("production", "view")) loaders.push(loadTable("production_orders", "production"));
-  if (hasPermission("service_orders", "view")) loaders.push(loadServiceOrdersTable());
+  if (hasPermission("production", "view")) {
+    loaders.push(loadTable("production_orders", "production"));
+    if (!hasPermission("products", "view")) loaders.push(loadProductsTable());
+  }
+  if (hasPermission("service_orders", "view")) {
+    loaders.push(loadServiceOrdersTable());
+    loaders.push(loadServiceOrderChecklistsTable());
+    if (!hasPermission("products", "view")) loaders.push(loadProductsTable());
+    if (!hasPermission("customers", "view")) loaders.push(loadTable("customers", "customers"));
+  }
   if (hasPermission("customers", "view")) loaders.push(loadTable("customers", "customers"));
   if (hasPermission("sales", "view")) loaders.push(loadTable("sales", "sales"));
   if (hasPermission("purchases", "view")) loaders.push(loadTable("purchase_requests", "purchases"));
+  if (hasPermission("payables", "view")) loaders.push(loadPayablesTable());
   if (hasPermission("reports", "view")) {
     if (!hasPermission("products", "view")) loaders.push(loadProductsTable());
     if (!hasPermission("inventory", "view")) loaders.push(loadInventoryMovementsTable());
     if (!hasPermission("production", "view")) loaders.push(loadTable("production_orders", "production"));
-    if (!hasPermission("service_orders", "view")) loaders.push(loadServiceOrdersTable());
+    if (!hasPermission("service_orders", "view")) {
+      loaders.push(loadServiceOrdersTable());
+      loaders.push(loadServiceOrderChecklistsTable());
+    }
     if (!hasPermission("customers", "view")) loaders.push(loadTable("customers", "customers"));
     if (!hasPermission("sales", "view")) loaders.push(loadTable("sales", "sales"));
     if (!hasPermission("purchases", "view")) loaders.push(loadTable("purchase_requests", "purchases"));
+    if (!hasPermission("payables", "view")) loaders.push(loadPayablesTable());
   }
   if (hasPermission("vps", "view")) loaders.push(loadVpsControlData());
   if (hasPermission("audit", "view")) loaders.push(loadAuditLogs());
@@ -995,7 +1170,7 @@ async function loadDashboardData() {
   const perf = startPerfMeasure("loadDashboardData");
   if (!state.supabase) {
     if (hasPermission("service_orders", "view")) {
-      await loadServiceOrdersTable();
+      await Promise.all([loadServiceOrdersTable(), loadServiceOrderChecklistsTable()]);
     }
     loadMachiningData();
     endPerfMeasure(perf, "mode=offline");
@@ -1013,6 +1188,7 @@ async function loadDashboardData() {
   if (hasPermission("service_orders", "view")) loaders.push(loadDashboardServiceOrdersData(dashboardFrom, dashboardTo));
   if (hasPermission("sales", "view")) loaders.push(loadDashboardSalesData(dashboardFrom, dashboardTo));
   if (hasPermission("purchases", "view")) loaders.push(loadDashboardPurchasesData(dashboardFrom, dashboardTo));
+  if (hasPermission("payables", "view")) loaders.push(loadDashboardPayablesData(dashboardFrom, dashboardTo));
 
   await Promise.all(loaders);
   loadMachiningData();
@@ -1035,7 +1211,7 @@ async function loadDashboardProductionData(fromDate, toDate) {
   const perf = startPerfMeasure("loadDashboardProductionData");
   let query = state.supabase
     .from("production_orders")
-    .select("id,order_number,product_id,product_code,product_name,batch_size,status,planned_start,planned_end,created_at,notes");
+    .select("id,order_number,product_id,product_code,product_name,batch_size,priority,status,planned_start,planned_end,created_at,notes,sale_id,sale_number,customer_name,delivery_days,bom_structure_id,production_items,operation_steps,timeline_entries,attachments,material_plan,quality_logs,alerts,current_step_index,produced_quantity,defective_quantity,rework_quantity,estimated_minutes,active_operator,started_at,paused_at,completed_at");
   if (fromDate) {
     query = query.gte("planned_start", fromDate);
   }
@@ -1068,16 +1244,24 @@ async function loadDashboardServiceOrdersData(fromDate, toDate) {
 
 async function loadDashboardSalesData(fromDate, toDate) {
   const perf = startPerfMeasure("loadDashboardSalesData");
-  let query = state.supabase
-    .from("sales")
-    .select("id,sale_date,created_at,delivery_date,customer_name,sale_number,status,payment_method,subtotal_amount,discount_amount,total_amount,sale_items,production_generated,production_order_ids,contract_notes");
-  if (fromDate) {
-    query = query.gte("sale_date", fromDate);
+  const buildQuery = (columns) => {
+    let query = state.supabase.from("sales").select(columns);
+    if (fromDate) {
+      query = query.gte("sale_date", fromDate);
+    }
+    if (toDate) {
+      query = query.lte("sale_date", toDate);
+    }
+    return query.order("created_at", { ascending: false });
+  };
+  const { data, error } = await buildQuery("id,sale_date,created_at,delivery_date,delivery_days,customer_name,sale_number,status,priority,payment_method,subtotal_amount,discount_amount,total_amount,sale_items,production_generated,production_order_ids,contract_notes");
+  if (error && isSalesSchemaCompatibilityError(error)) {
+    const fallback = await buildQuery("id,sale_date,created_at,delivery_date,customer_name,sale_number,status,payment_method,subtotal_amount,discount_amount,total_amount,sale_items,production_generated,production_order_ids,contract_notes");
+    if (fallback.error) throw fallback.error;
+    state.moduleData.sales = fallback.data || [];
+    endPerfMeasure(perf, `rows=${state.moduleData.sales.length}`);
+    return;
   }
-  if (toDate) {
-    query = query.lte("sale_date", toDate);
-  }
-  const { data, error } = await query.order("created_at", { ascending: false });
   if (error) throw error;
   state.moduleData.sales = data || [];
   endPerfMeasure(perf, `rows=${state.moduleData.sales.length}`);
@@ -1100,6 +1284,24 @@ async function loadDashboardPurchasesData(fromDate, toDate) {
   endPerfMeasure(perf, `rows=${state.moduleData.purchases.length}`);
 }
 
+async function loadDashboardPayablesData(fromDate, toDate) {
+  const perf = startPerfMeasure("loadDashboardPayablesData");
+  let query = state.supabase
+    .from("accounts_payable")
+    .select("*");
+  if (fromDate) {
+    query = query.gte("due_date", fromDate);
+  }
+  if (toDate) {
+    query = query.lte("due_date", toDate);
+  }
+  const { data, error } = await query.order("due_date", { ascending: true });
+  if (error) throw error;
+  state.moduleData.payables = data || [];
+  watchPayablesAlerts();
+  endPerfMeasure(perf, `rows=${state.moduleData.payables.length}`);
+}
+
 async function loadDataForModule(moduleKey) {
   const perf = startPerfMeasure(`loadDataForModule:${moduleKey}`);
   if (moduleKey === "dashboard") {
@@ -1116,7 +1318,7 @@ async function loadDataForModule(moduleKey) {
 
   if (!state.supabase) {
     if (moduleKey === "service_orders") {
-      await loadServiceOrdersTable();
+      await Promise.all([loadServiceOrdersTable(), loadServiceOrderChecklistsTable()]);
     }
     loadMachiningData();
     endPerfMeasure(perf, "mode=offline");
@@ -1130,21 +1332,37 @@ async function loadDataForModule(moduleKey) {
   }
   if (moduleKey === "products" && hasPermission("products", "view")) {
     loaders.push(loadProductsTable());
+    if (hasPermission("bom", "view")) {
+      loaders.push(loadBomData());
+    }
   }
   if (moduleKey === "bom" && hasPermission("bom", "view")) {
     loaders.push(loadBomData());
+    loaders.push(loadProductsTable());
   }
   if (moduleKey === "inventory" && hasPermission("inventory", "view")) {
     loaders.push(loadInventoryMovementsTable());
+    loaders.push(loadProductsTable());
+    if (hasPermission("bom", "view")) {
+      loaders.push(loadBomData());
+    }
   }
   if (moduleKey === "production" && hasPermission("production", "view")) {
     loaders.push(loadTable("production_orders", "production"));
+    loaders.push(loadProductsTable());
+    loaders.push(loadBomData());
     if (!hasPermission("permissions", "view")) {
       loaders.push(loadAssignableUsers());
     }
   }
+  if (moduleKey === "machining" && hasPermission("products", "view")) {
+    loaders.push(loadProductsTable());
+  }
   if (moduleKey === "service_orders" && hasPermission("service_orders", "view")) {
     loaders.push(loadServiceOrdersTable());
+    loaders.push(loadServiceOrderChecklistsTable());
+    loaders.push(loadProductsTable());
+    loaders.push(loadTable("customers", "customers"));
     if (!hasPermission("permissions", "view")) {
       loaders.push(loadAssignableUsers());
     }
@@ -1153,12 +1371,22 @@ async function loadDataForModule(moduleKey) {
     loaders.push(loadTable("customers", "customers"));
   }
   if (moduleKey === "sales" && hasPermission("sales", "view")) {
+    loaders.push(loadProductsTable());
+    loaders.push(loadBomData());
+    loaders.push(loadTable("customers", "customers"));
     loaders.push(loadTable("sales", "sales"));
   }
   if (moduleKey === "purchases" && hasPermission("purchases", "view")) {
     loaders.push(loadTable("purchase_requests", "purchases"));
+    loaders.push(loadProductsTable());
     if (!hasPermission("permissions", "view")) {
       loaders.push(loadAssignableUsers());
+    }
+  }
+  if (moduleKey === "payables" && hasPermission("payables", "view")) {
+    loaders.push(loadPayablesTable());
+    if (hasPermission("sales", "view")) {
+      loaders.push(loadTable("sales", "sales"));
     }
   }
   if (moduleKey === "vps" && hasPermission("vps", "view")) {
@@ -1184,7 +1412,7 @@ async function loadAssignableUsers() {
 
 async function callVpsControlApi(view, options = {}) {
   if (!state.supabase) {
-    throw new Error("Conexao com Supabase indisponivel.");
+    throw new Error("Conexão com Supabase indisponível.");
   }
 
   if (view === "snapshot") {
@@ -1231,7 +1459,7 @@ async function callVpsControlApi(view, options = {}) {
     return data || {};
   }
 
-  throw new Error("Operacao do modulo VPS nao suportada.");
+  throw new Error("Operação do módulo VPS não suportada.");
 }
 
 async function loadVpsControlData() {
@@ -1304,6 +1532,46 @@ async function loadTable(tableName, stateKey) {
   endPerfMeasure(perf, `rows=${state.moduleData[stateKey].length}`);
 }
 
+function upsertModuleRecord(stateKey, record, options = {}) {
+  if (!record?.id) return;
+  const normalize = typeof options.normalize === "function" ? options.normalize : (item) => item;
+  const nextRecord = normalize(record);
+  const currentItems = Array.isArray(state.moduleData[stateKey]) ? state.moduleData[stateKey] : [];
+  const nextItems = currentItems.filter((item) => item.id !== nextRecord.id);
+  state.moduleData[stateKey] = [nextRecord, ...nextItems].sort((left, right) =>
+    new Date(right.created_at || 0) - new Date(left.created_at || 0)
+  );
+  state.dashboardLastUpdatedAt = new Date().toISOString();
+  if (stateKey === "production" || stateKey === "inventory") {
+    syncMachiningDerivedData();
+  }
+}
+
+function removeModuleRecord(stateKey, recordId) {
+  if (!recordId) return;
+  const currentItems = Array.isArray(state.moduleData[stateKey]) ? state.moduleData[stateKey] : [];
+  state.moduleData[stateKey] = currentItems.filter((item) => item.id !== recordId);
+  state.dashboardLastUpdatedAt = new Date().toISOString();
+  if (stateKey === "production" || stateKey === "inventory") {
+    syncMachiningDerivedData();
+  }
+}
+
+async function loadPayablesTable() {
+  try {
+    await loadTable("accounts_payable", "payables");
+    watchPayablesAlerts();
+  } catch (error) {
+    state.moduleData.payables = [];
+    if (!loadPayablesTable.warned && /accounts_payable|column|schema cache|relation .* does not exist/i.test(String(error?.message || ""))) {
+      loadPayablesTable.warned = true;
+      showToast("Tabela de contas a pagar ainda não aplicada no banco.", "warning");
+      return;
+    }
+    throw error;
+  }
+}
+
 async function loadProductsTable() {
   try {
     await loadTable("products", "products");
@@ -1311,7 +1579,7 @@ async function loadProductsTable() {
     state.moduleData.products = [];
     if (!loadProductsTable.warned && String(error?.message || "").toLowerCase().includes("products")) {
       loadProductsTable.warned = true;
-      showToast("Tabela de produtos ainda nao aplicada no banco. Execute o schema do Supabase.", "warning");
+      showToast("Tabela de produtos ainda não aplicada no banco. Execute o schema do Supabase.", "warning");
       return;
     }
 
@@ -1326,7 +1594,7 @@ async function loadInventoryMovementsTable() {
     state.moduleData.inventory = [];
     if (!loadInventoryMovementsTable.warned && String(error?.message || "").toLowerCase().includes("inventory_movements")) {
       loadInventoryMovementsTable.warned = true;
-      showToast("Tabela de movimentacoes de estoque ainda nao aplicada no banco.", "warning");
+      showToast("Tabela de movimentações de estoque ainda não aplicada no banco.", "warning");
       return;
     }
 
@@ -1354,7 +1622,7 @@ async function loadBomData() {
     state.moduleData.bomStructures = [];
     if (!loadBomData.warned && /bom_materials|bom_structures/i.test(String(error?.message || ""))) {
       loadBomData.warned = true;
-      showToast("Estruturas do BOM ainda nao aplicadas no banco.", "warning");
+      showToast("Estruturas do BOM ainda não aplicadas no banco.", "warning");
       return;
     }
 
@@ -1399,7 +1667,7 @@ async function loadAuditLogs() {
     state.moduleData.auditLogs = [];
     if (!loadAuditLogs.warned && /logs_sistema|column|schema cache|relation .* does not exist/i.test(String(error?.message || ""))) {
       loadAuditLogs.warned = true;
-      showToast("Tabela de auditoria ainda nao aplicada no banco.", "warning");
+      showToast("Tabela de auditoria ainda não aplicada no banco.", "warning");
       return;
     }
     throw error;
@@ -1409,19 +1677,20 @@ async function loadAuditLogs() {
 function renderActiveModule() {
   const moduleKey = MODULES.some((module) => module.key === state.activeModule) ? state.activeModule : "dashboard";
   const requestId = ++activeModuleRenderRequestId;
+  const focusSnapshot = getModuleFocusSnapshot();
   elements.moduleContainer.innerHTML = renderModuleLoadingState(moduleKey);
-  lastActiveModuleRenderPromise = renderActiveModuleAsync(moduleKey, requestId);
+  lastActiveModuleRenderPromise = renderActiveModuleAsync(moduleKey, requestId, focusSnapshot);
   return lastActiveModuleRenderPromise;
 }
 
-async function renderActiveModuleAsync(moduleKey, requestId) {
+async function renderActiveModuleAsync(moduleKey, requestId, focusSnapshot = null) {
   try {
     const moduleController = await importModuleController(moduleKey);
     if (requestId !== activeModuleRenderRequestId) return;
 
     const html = typeof moduleController.render === "function"
       ? moduleController.render()
-      : `<div class="empty-state">Modulo ${escapeHtml(moduleKey)} indisponivel.</div>`;
+      : `<div class="empty-state">Módulo ${escapeHtml(moduleKey)} indisponível.</div>`;
 
     elements.moduleContainer.innerHTML = html;
 
@@ -1432,6 +1701,7 @@ async function renderActiveModuleAsync(moduleKey, requestId) {
     bindCurrencyInputs(elements.moduleContainer);
     bindEditActions();
     bindDeleteActions();
+    restoreModuleFocusSnapshot(focusSnapshot);
     trackModuleAccessIfNeeded();
   } catch (error) {
     if (requestId !== activeModuleRenderRequestId) return;
@@ -1444,7 +1714,7 @@ async function renderActiveModuleAsync(moduleKey, requestId) {
 }
 
 function renderModuleLoadingState(moduleKey) {
-  const moduleLabel = MODULES.find((module) => module.key === moduleKey)?.label || "Modulo";
+  const moduleLabel = MODULES.find((module) => module.key === moduleKey)?.label || "Módulo";
   return `
     <section class="module-panel">
       <div class="empty-state">Carregando ${escapeHtml(moduleLabel)}...</div>
@@ -1512,7 +1782,7 @@ async function refreshDashboardData({ silent = false } = {}) {
 
 function renderProductsModule() {
   if (!hasPermission("products", "view")) {
-    return noPermissionTemplate("Seu perfil nao possui acesso ao modulo de produtos.");
+    return noPermissionTemplate("Seu perfil não possui acesso ao módulo de produtos.");
   }
 
   const canEdit = hasPermission("products", "edit");
@@ -1520,22 +1790,16 @@ function renderProductsModule() {
   const searchTerm = state.productSearch.trim().toLowerCase();
   const filteredProducts = products.filter((item) => {
     const matchesSearch = !searchTerm
-      || [item.code, item.name, item.supplier, item.location, item.batch]
+    || [item.code, item.name, item.category, item.product_type, item.supplier, item.location, item.batch]
         .some((value) => String(value || "").toLowerCase().includes(searchTerm));
-    const matchesCategory = state.productCategoryFilter === "all" || item.category === state.productCategoryFilter;
+    const matchesCategory = state.productCategoryFilter === "all" || getProductCategory(item) === state.productCategoryFilter;
     return matchesSearch && matchesCategory;
   });
   const activeProducts = products.filter((item) => item.status === "active").length;
   const lowStockItems = products.filter((item) => Number(item.current_stock) <= Number(item.minimum_stock));
-  const finishedProducts = products.filter((item) => item.category === "finished_product").length;
+  const finishedProducts = products.filter((item) => getProductType(item) === "finished_product").length;
   const movementProduct = products.find((item) => item.id === state.productMovementId);
-  const categoryOptions = [
-    { value: "all", label: "Todas categorias" },
-    { value: "raw_material", label: "Materia-prima" },
-    { value: "finished_product", label: "Produto acabado" },
-    { value: "packaging", label: "Embalagem" },
-    { value: "consumable", label: "Insumo" },
-  ];
+  const categoryOptions = buildProductCategoryOptions();
 
   return `
     <section class="module-panel">
@@ -1543,7 +1807,7 @@ function renderProductsModule() {
         <div>
           <p class="eyebrow muted">Cadastro mestre</p>
           <h3>Cadastro de Produtos</h3>
-          <p class="muted">Itens integrados a estoque, producao, compras e vendas em um unico cadastro.</p>
+          <p class="muted">Itens integrados a estoque, produção, compras e vendas em um único cadastro.</p>
         </div>
         <div class="module-head-actions">
           <button class="ghost-button secondary-surface-button" type="button" data-product-view-inventory>Ver Estoque</button>
@@ -1569,7 +1833,7 @@ function renderProductsModule() {
         ${renderKpiCard({
           label: "Estoque Baixo",
           value: lowStockItems.length,
-          note: lowStockItems.length ? "Itens abaixo do minimo configurado" : "Sem alerta de estoque minimo",
+          note: lowStockItems.length ? "Itens abaixo do mínimo configurado" : "Sem alerta de estoque mínimo",
           icon: "◩",
           tone: "red",
         })}
@@ -1587,7 +1851,7 @@ function renderProductsModule() {
           ? state.productFormVisible
             ? renderProductForm()
             : ""
-          : `<div class="empty-state">Seu perfil pode visualizar este modulo, mas nao pode editar.</div>`
+          : `<div class="empty-state">Seu perfil pode visualizar este módulo, mas não pode editar.</div>`
       }
       ${movementProduct && canEdit ? renderProductMovementPanel(movementProduct) : ""}
 
@@ -1602,7 +1866,7 @@ function renderProductsModule() {
             ${categoryOptions
               .map(
                 (option) =>
-                  `<option value="${option.value}" ${option.value === state.productCategoryFilter ? "selected" : ""}>${option.label}</option>`
+                  `<option value="${escapeHtml(option.value)}" ${option.value === state.productCategoryFilter ? "selected" : ""}>${escapeHtml(option.label)}</option>`
               )
               .join("")}
           </select>
@@ -1614,15 +1878,16 @@ function renderProductsModule() {
           <thead>
             <tr>
               <th>ID</th>
-              <th>Codigo</th>
+              <th>Código</th>
               <th>Nome</th>
               <th>Status</th>
               <th>Categoria</th>
+              <th>Tipo</th>
               <th>Unidade</th>
               <th>Estoque Atual</th>
               <th>Lote</th>
-              <th>Serie da Maquina</th>
-              <th>Ultimo Movimentador</th>
+              <th>Série da Máquina</th>
+              <th>Último Movimentador</th>
               <th>Acoes</th>
             </tr>
           </thead>
@@ -1637,10 +1902,11 @@ function renderProductsModule() {
                           <td>${item.code}</td>
                           <td>
                             <strong>${item.name}</strong>
-                            <div class="table-inline-copy muted">${item.location || "Sem localizacao"}</div>
+                            <div class="table-inline-copy muted">${item.location || "Sem localização"}</div>
                           </td>
                           <td>${productStatusCell(item.status)}</td>
                           <td>${productCategoryCell(item.category)}</td>
+                          <td>${productTypeCell(getProductType(item))}</td>
                           <td>${item.unit}</td>
                           <td>${productStockCell(item)}</td>
                           <td>${item.batch || "-"}</td>
@@ -1651,7 +1917,7 @@ function renderProductsModule() {
                       `
                     )
                     .join("")
-                : `<tr><td colspan="11"><div class="empty-state">Nenhum produto encontrado</div></td></tr>`
+                : `<tr><td colspan="12"><div class="empty-state">Nenhum produto encontrado</div></td></tr>`
             }
           </tbody>
         </table>
@@ -1669,7 +1935,7 @@ function renderDashboard() {
         <div>
           <p class="eyebrow muted">Visao estrategica do negocio</p>
           <h3>Dashboard do Administrador</h3>
-          <p class="muted">Leitura rapida de lucro, operacao, riscos e desempenho geral em um unico painel.</p>
+          <p class="muted">Leitura rápida de lucro, operação, riscos e desempenho geral em um único painel.</p>
         </div>
         <div class="module-head-actions dashboard-head-actions">
           <div class="dashboard-updated-badge">
@@ -1724,10 +1990,10 @@ function renderDashboard() {
         <div class="dashboard-block-header">
           <div>
             <h4>Alertas Prioritarios</h4>
-            <p class="muted">Problemas que exigem acao imediata ou acompanhamento de perto.</p>
+            <p class="muted">Problemas que exigem ação imediata ou acompanhamento de perto.</p>
           </div>
           <span class="status-chip ${snapshot.alerts.length ? "status-pending" : "status-completed"}">
-            ${snapshot.alerts.length ? `${snapshot.alerts.length} alerta(s)` : "Operacao estavel"}
+            ${snapshot.alerts.length ? `${snapshot.alerts.length} alerta(s)` : "Operação estável"}
           </span>
         </div>
         <div class="dashboard-alert-list">
@@ -1758,7 +2024,7 @@ function renderDashboard() {
           <section class="dashboard-block">
             <div class="dashboard-block-header">
               <div>
-                <h4>Producao</h4>
+                <h4>Produção</h4>
                 <p class="muted">Volume produzido por periodo e tempo medio para concluir ordens.</p>
               </div>
             </div>
@@ -1769,11 +2035,11 @@ function renderDashboard() {
             })}
             <div class="dashboard-chart-metrics">
               <article class="dashboard-stat-card">
-                <span class="muted">Tempo medio de producao</span>
+                <span class="muted">Tempo medio de produção</span>
                 <strong>${snapshot.productionAverageTimeLabel}</strong>
               </article>
               <article class="dashboard-stat-card">
-                <span class="muted">Ordens concluidas</span>
+                <span class="muted">Ordens concluídas</span>
                 <strong>${snapshot.productionCompletedCount}</strong>
               </article>
             </div>
@@ -1783,7 +2049,7 @@ function renderDashboard() {
             <div class="dashboard-block-header">
               <div>
                 <h4>Pedidos Recentes</h4>
-                <p class="muted">Pedidos mais relevantes com status, prioridade e atalhos de acao.</p>
+                <p class="muted">Pedidos mais relevantes com status, prioridade e atalhos de ação.</p>
               </div>
             </div>
             <div class="table-wrapper dashboard-orders-table">
@@ -1832,7 +2098,7 @@ function renderDashboard() {
             <div class="dashboard-block-header">
               <div>
                 <h4>Comercial</h4>
-                <p class="muted">Pedidos por periodo com leitura rapida de volume e ticket medio.</p>
+                <p class="muted">Pedidos por periodo com leitura rápida de volume e ticket medio.</p>
               </div>
             </div>
             ${renderDashboardBarChart({
@@ -1855,7 +2121,7 @@ function renderDashboard() {
           <section class="dashboard-block">
             <div class="dashboard-block-header">
               <div>
-                <h4>Pipeline da Producao</h4>
+                <h4>Pipeline da Produção</h4>
                 <p class="muted">Fluxo resumido por etapa com destaque para gargalos.</p>
               </div>
             </div>
@@ -1886,9 +2152,9 @@ function renderDashboard() {
             <div class="dashboard-block-header">
               <div>
                 <h4>Estoque Critico</h4>
-                <p class="muted">Itens baixos ou zerados que podem afetar a operacao.</p>
+                <p class="muted">Itens baixos ou zerados que podem afetar a operação.</p>
               </div>
-              <button class="ghost-button" type="button" data-dashboard-module="inventory">Ir para modulo</button>
+              <button class="ghost-button" type="button" data-dashboard-module="inventory">Ir para módulo</button>
             </div>
             <div class="dashboard-list">
               ${
@@ -1897,7 +2163,7 @@ function renderDashboard() {
                     <article class="dashboard-list-item dashboard-stock-alert ${item.level}">
                       <div>
                         <strong>${escapeHtml(item.name)}</strong>
-                        <span class="muted">Saldo ${formatQuantity(item.currentStock)} ${escapeHtml(item.unit)} | Minimo ${formatQuantity(item.minimumStock)} ${escapeHtml(item.unit)}</span>
+                        <span class="muted">Saldo ${formatQuantity(item.currentStock)} ${escapeHtml(item.unit)} | Mínimo ${formatQuantity(item.minimumStock)} ${escapeHtml(item.unit)}</span>
                       </div>
                       <span class="status-chip ${item.level === "danger" ? "status-cancelled" : "status-pending"}">
                         ${item.level === "danger" ? "Zerado" : "Baixo"}
@@ -1935,6 +2201,8 @@ function buildReportsSnapshot() {
     .filter(({ sale }) => isDateWithinReportsRange(sale.created_at || `${sale.sale_date || ""}T00:00:00`));
   const purchases = (state.moduleData.purchases || []).map((request) => ({ request, metadata: getPurchaseRequestMetadata(request) }))
     .filter(({ request }) => isDateWithinReportsRange(request.created_at || `${new Date().toISOString().slice(0, 10)}T00:00:00`));
+  const payables = (state.moduleData.payables || []).map((payable) => ({ payable, metadata: getPayableMetadata(payable) }))
+    .filter(({ metadata }) => isDateWithinReportsRange(`${metadata.due_date || new Date().toISOString().slice(0, 10)}T00:00:00`));
   const production = (state.moduleData.production || []).filter((order) =>
     isDateWithinReportsRange(`${order.planned_start || String(order.created_at || "").slice(0, 10)}T00:00:00`)
   );
@@ -1947,6 +2215,11 @@ function buildReportsSnapshot() {
   const totalSales = finalizedSales.reduce((sum, { metadata }) => sum + Number(metadata.total || 0), 0);
   const openPurchases = purchases.filter(({ metadata }) => ["pending", "in_analysis", "approved", "in_purchase"].includes(metadata.status));
   const totalPurchases = purchases.reduce((sum, { metadata }) => sum + Number(metadata.purchaseDetails.total_amount || 0), 0);
+  const pendingPayables = payables.filter(({ metadata }) => ["pending", "overdue"].includes(metadata.status));
+  const totalPayables = payables.reduce((sum, { metadata }) => sum + Number(metadata.amount || 0), 0);
+  const paidPayablesTotal = payables
+    .filter(({ metadata }) => metadata.status === "paid")
+    .reduce((sum, { metadata }) => sum + Number(metadata.amount || 0), 0);
   const completedProduction = production.filter((item) => item.status === "completed");
   const inProgressProduction = production.filter((item) => item.status === "in_progress");
   const openServiceOrders = serviceOrders.filter((item) => !["completed", "cancelled"].includes(item.status));
@@ -1956,6 +2229,9 @@ function buildReportsSnapshot() {
     finalizedSalesCount: finalizedSales.length,
     totalPurchases,
     openPurchasesCount: openPurchases.length,
+    totalPayables,
+    pendingPayablesCount: pendingPayables.length,
+    paidPayablesTotal,
     completedProductionCount: completedProduction.length,
     inProgressProductionCount: inProgressProduction.length,
     criticalStockCount: criticalStock.length,
@@ -1964,6 +2240,7 @@ function buildReportsSnapshot() {
     production,
     criticalStock,
     purchases,
+    payables,
     serviceOrders: openServiceOrders.slice(0, 8),
   };
 }
@@ -1985,12 +2262,22 @@ function buildReportsExportHtml(snapshot) {
       <td>${escapeHtml(order.status || "-")}</td>
     </tr>
   `).join("");
+  const payableRows = snapshot.payables.slice(0, 12).map(({ payable, metadata }) => `
+    <tr>
+      <td>${escapeHtml(metadata.payable_number || payable.id || "-")}</td>
+      <td>${escapeHtml(metadata.supplier || "-")}</td>
+      <td>${escapeHtml(metadata.category || "-")}</td>
+      <td>${formatCurrency(metadata.amount || 0)}</td>
+      <td>${escapeHtml(formatDate(metadata.due_date))}</td>
+      <td>${escapeHtml(metadata.status === "paid" ? "Pago" : metadata.status === "overdue" ? "Atrasado" : "Pendente")}</td>
+    </tr>
+  `).join("");
 
   return `
     <article class="sales-document-sheet">
       <header class="sales-document-header">
         <div>
-          <h2>Relatorios Gerenciais</h2>
+          <h2>Relatórios Gerenciais</h2>
           <p>Periodo de ${escapeHtml(formatDate(state.reportsFilters.from))} ate ${escapeHtml(formatDate(state.reportsFilters.to))}</p>
         </div>
         <div class="sales-document-meta">
@@ -1998,17 +2285,22 @@ function buildReportsExportHtml(snapshot) {
         </div>
       </header>
       <section class="sales-document-banner">
-        <p>Vendas finalizadas: ${formatCurrency(snapshot.totalSales)} • Compras registradas: ${formatCurrency(snapshot.totalPurchases)} • Producao concluida: ${snapshot.completedProductionCount}</p>
+        <p>Vendas finalizadas: ${formatCurrency(snapshot.totalSales)} • Compras registradas: ${formatCurrency(snapshot.totalPurchases)} • Contas a pagar: ${formatCurrency(snapshot.totalPayables)} • Produção concluída: ${snapshot.completedProductionCount}</p>
       </section>
       <h3>Vendas recentes</h3>
       <table class="sales-document-items-table">
-        <thead><tr><th>Numero</th><th>Cliente</th><th>Total</th><th>Status</th></tr></thead>
+        <thead><tr><th>Número</th><th>Cliente</th><th>Total</th><th>Status</th></tr></thead>
         <tbody>${salesRows || `<tr><td colspan="4">Sem vendas no periodo.</td></tr>`}</tbody>
       </table>
-      <h3>Producao</h3>
+      <h3>Produção</h3>
       <table class="sales-document-items-table">
         <thead><tr><th>Ordem</th><th>Produto</th><th>Quantidade</th><th>Status</th></tr></thead>
         <tbody>${productionRows || `<tr><td colspan="4">Sem ordens no periodo.</td></tr>`}</tbody>
+      </table>
+      <h3>Contas a pagar</h3>
+      <table class="sales-document-items-table">
+        <thead><tr><th>Número</th><th>Fornecedor</th><th>Categoria</th><th>Valor</th><th>Vencimento</th><th>Status</th></tr></thead>
+        <tbody>${payableRows || `<tr><td colspan="6">Sem contas a pagar no periodo.</td></tr>`}</tbody>
       </table>
     </article>
   `;
@@ -2016,7 +2308,7 @@ function buildReportsExportHtml(snapshot) {
 
 function renderReportsModule() {
   if (!hasPermission("reports", "view")) {
-    return noPermissionTemplate("Seu perfil nao possui acesso ao modulo de relatorios.");
+    return noPermissionTemplate("Seu perfil não possui acesso ao módulo de relatórios.");
   }
 
   const snapshot = buildReportsSnapshot();
@@ -2026,8 +2318,8 @@ function renderReportsModule() {
       <div class="module-head">
         <div>
           <p class="eyebrow muted">Analise gerencial</p>
-          <h3>Relatorios</h3>
-          <p class="muted">Consolidado operacional de vendas, producao, compras, estoque e ordens de servico.</p>
+          <h3>Relatórios</h3>
+          <p class="muted">Consolidado operacional de vendas, produção, compras, estoque e ordens de serviço.</p>
         </div>
         <div class="module-head-actions">
           <button class="ghost-button" type="button" data-reports-refresh>Atualizar</button>
@@ -2037,7 +2329,7 @@ function renderReportsModule() {
 
       <form id="reports-filter-form" class="table-actions reports-filter-grid">
         <label>De<input type="date" name="from" value="${escapeHtml(state.reportsFilters.from)}" /></label>
-        <label>Ate<input type="date" name="to" value="${escapeHtml(state.reportsFilters.to)}" /></label>
+        <label>Até<input type="date" name="to" value="${escapeHtml(state.reportsFilters.to)}" /></label>
         <div class="form-actions-row">
           <button class="primary-button" type="submit">Aplicar periodo</button>
         </div>
@@ -2045,8 +2337,8 @@ function renderReportsModule() {
 
       <div class="summary-grid">
         ${renderKpiCard({ label: "Vendas Finalizadas", value: formatCurrency(snapshot.totalSales), note: `${snapshot.finalizedSalesCount} venda(s) no periodo`, icon: "◨", tone: "green" })}
-        ${renderKpiCard({ label: "Compras", value: formatCurrency(snapshot.totalPurchases), note: `${snapshot.openPurchasesCount} solicitacao(oes) em aberto`, icon: "◧", tone: "amber" })}
-        ${renderKpiCard({ label: "Producao Concluida", value: snapshot.completedProductionCount, note: `${snapshot.inProgressProductionCount} ordem(ns) em andamento`, icon: "◭", tone: "blue" })}
+        ${renderKpiCard({ label: "Compras", value: formatCurrency(snapshot.totalPurchases), note: `${snapshot.openPurchasesCount} solicitação(oes) em aberto`, icon: "◧", tone: "amber" })}
+        ${renderKpiCard({ label: "Produção Concluída", value: snapshot.completedProductionCount, note: `${snapshot.inProgressProductionCount} ordem(ns) em andamento`, icon: "◭", tone: "blue" })}
         ${renderKpiCard({ label: "Estoque Critico", value: snapshot.criticalStockCount, note: `${snapshot.openServiceOrdersCount} OS abertas`, icon: "◬", tone: "red" })}
       </div>
 
@@ -2055,11 +2347,11 @@ function renderReportsModule() {
           <div class="dashboard-block-header">
             <div>
               <h4>Vendas recentes</h4>
-              <p class="muted">Ultimas vendas finalizadas dentro do periodo.</p>
+              <p class="muted">Últimas vendas finalizadas dentro do período.</p>
             </div>
           </div>
           ${renderTable(
-            ["Numero", "Cliente", "Total", "Status"],
+            ["Número", "Cliente", "Total", "Status"],
             snapshot.recentSales.map(({ sale, metadata }) => [
               sale.sale_number || sale.id || "-",
               sale.customer_name || "-",
@@ -2072,8 +2364,8 @@ function renderReportsModule() {
         <section class="table-card">
           <div class="dashboard-block-header">
             <div>
-              <h4>Producao</h4>
-              <p class="muted">Ordens planejadas, em andamento e concluidas.</p>
+              <h4>Produção</h4>
+              <p class="muted">Ordens planejadas, em andamento e concluídas.</p>
             </div>
           </div>
           ${renderTable(
@@ -2091,11 +2383,11 @@ function renderReportsModule() {
           <div class="dashboard-block-header">
             <div>
               <h4>Estoque critico</h4>
-              <p class="muted">Itens abaixo do minimo para acompanhamento imediato.</p>
+              <p class="muted">Itens abaixo do mínimo para acompanhamento imediato.</p>
             </div>
           </div>
           ${renderTable(
-            ["Produto", "Atual", "Minimo", "Unidade"],
+            ["Produto", "Atual", "Mínimo", "Unidade"],
             snapshot.criticalStock.slice(0, 10).map((item) => [
               item.name,
               formatQuantity(item.current_stock),
@@ -2108,7 +2400,7 @@ function renderReportsModule() {
         <section class="table-card">
           <div class="dashboard-block-header">
             <div>
-              <h4>Ordens de servico abertas</h4>
+              <h4>Ordens de serviço abertas</h4>
               <p class="muted">Pendencias operacionais no periodo selecionado.</p>
             </div>
           </div>
@@ -2142,10 +2434,10 @@ function renderKpiCard(card) {
 
 function bindDashboardEvents() {
   document.querySelectorAll("[data-dashboard-range]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
       state.dashboardRange = button.dataset.dashboardRange || "30d";
       if (state.dashboardRange !== "custom") {
-        renderActiveModule();
+        await refreshDashboardData();
       } else {
         if (!state.dashboardCustomRange.to) {
           state.dashboardCustomRange.to = new Date().toISOString().slice(0, 10);
@@ -2153,21 +2445,21 @@ function bindDashboardEvents() {
         if (!state.dashboardCustomRange.from) {
           state.dashboardCustomRange.from = getDateShiftedIso(state.dashboardCustomRange.to, -29);
         }
-        renderActiveModule();
+        await refreshDashboardData();
       }
     });
   });
 
-  document.querySelector("#dashboard-range-from")?.addEventListener("change", (event) => {
+  document.querySelector("#dashboard-range-from")?.addEventListener("change", async (event) => {
     state.dashboardRange = "custom";
     state.dashboardCustomRange.from = event.currentTarget.value;
-    renderActiveModule();
+    await refreshDashboardData();
   });
 
-  document.querySelector("#dashboard-range-to")?.addEventListener("change", (event) => {
+  document.querySelector("#dashboard-range-to")?.addEventListener("change", async (event) => {
     state.dashboardRange = "custom";
     state.dashboardCustomRange.to = event.currentTarget.value;
-    renderActiveModule();
+    await refreshDashboardData();
   });
 
   document.querySelector("[data-dashboard-refresh]")?.addEventListener("click", async () => {
@@ -2225,6 +2517,10 @@ function buildDashboardSnapshot() {
     purchase,
     metadata: getPurchaseRequestMetadata(purchase),
   }));
+  const payables = (state.moduleData.payables || []).map((payable) => ({
+    payable,
+    metadata: getPayableMetadata(payable),
+  }));
   const production = (state.moduleData.production || []).map((order) => ({
     order,
     metadata: getProductionOrderMetadata(order),
@@ -2235,6 +2531,9 @@ function buildDashboardSnapshot() {
   );
   const filteredPurchases = purchases.filter(({ purchase, metadata }) =>
     isDashboardRecordInRange(metadata.purchaseDetails.purchase_date || purchase.created_at, range)
+  );
+  const filteredPayables = payables.filter(({ payable, metadata }) =>
+    isDashboardRecordInRange(metadata.due_date || payable.created_at, range)
   );
   const filteredProduction = production.filter(({ order }) =>
     isDashboardRecordInRange(order.planned_start || order.created_at || order.planned_end, range)
@@ -2248,12 +2547,12 @@ function buildDashboardSnapshot() {
   const revenue = filteredSales
     .filter(({ metadata }) => metadata.status === "finalized")
     .reduce((total, entry) => total + Number(entry.metadata.total || 0), 0);
-  const estimatedCosts = filteredPurchases
-    .filter(({ metadata }) => ["purchase_completed", "completed"].includes(metadata.status))
-    .reduce((total, entry) => total + Number(entry.metadata.purchaseDetails.total_amount || 0), 0);
-  const pendingPayables = filteredPurchases
-    .filter(({ metadata }) => ["pending", "in_analysis", "approved", "in_purchase", "purchase_completed"].includes(metadata.status))
-    .reduce((total, entry) => total + Number(entry.metadata.purchaseDetails.total_amount || 0), 0);
+  const estimatedCosts = (filteredPayables.length ? filteredPayables : filteredPurchases)
+    .filter(({ metadata }) => ["paid", "purchase_completed", "completed"].includes(metadata.status))
+    .reduce((total, entry) => total + Number(entry.metadata.amount || entry.metadata.purchaseDetails?.total_amount || 0), 0);
+  const pendingPayables = (filteredPayables.length ? filteredPayables : filteredPurchases)
+    .filter(({ metadata }) => ["pending", "overdue", "in_analysis", "approved", "in_purchase", "purchase_completed"].includes(metadata.status))
+    .reduce((total, entry) => total + Number(entry.metadata.amount || entry.metadata.purchaseDetails?.total_amount || 0), 0);
   const pendingReceivables = filteredSales
     .filter(({ metadata }) => metadata.status === "finalized")
     .reduce((total, entry) => total + Number(entry.metadata.total || 0), 0);
@@ -2293,7 +2592,7 @@ function buildDashboardSnapshot() {
     delayedProduction.length
       ? {
         tone: "danger",
-        title: "Producao atrasada",
+        title: "Produção atrasada",
         description: `${delayedProduction.length} ordem(ns) estao fora do prazo previsto.`,
         actionLabel: "Resolver",
         module: "production",
@@ -2312,15 +2611,15 @@ function buildDashboardSnapshot() {
       ? {
         tone: lowStockItems.some((item) => item.level === "danger") ? "danger" : "warning",
         title: "Estoque critico",
-        description: `${lowStockItems.length} item(ns) estao abaixo do minimo configurado.`,
-        actionLabel: "Ir para modulo",
+        description: `${lowStockItems.length} item(ns) estao abaixo do mínimo configurado.`,
+        actionLabel: "Ir para módulo",
         module: "inventory",
       }
       : null,
     machineStoppedCount
       ? {
         tone: "danger",
-        title: "Maquina ou etapa parada",
+        title: "Máquina ou etapa parada",
         description: `${machineStoppedCount} item(ns) de usinagem possuem etapa bloqueada.`,
         actionLabel: "Resolver",
         module: "machining",
@@ -2330,13 +2629,15 @@ function buildDashboardSnapshot() {
       ? {
         tone: "warning",
         title: "Pagamentos pendentes",
-        description: `${formatCurrency(pendingPayables)} em compras aguardando fechamento.`,
-        actionLabel: "Ir para modulo",
-        module: "purchases",
+        description: filteredPayables.length
+          ? `${formatCurrency(pendingPayables)} em contas a pagar aguardando baixa.`
+          : `${formatCurrency(pendingPayables)} em compras aguardando fechamento.`,
+        actionLabel: "Ir para módulo",
+        module: filteredPayables.length ? "payables" : "purchases",
       }
       : null,
   ].filter(Boolean);
-  const financeBuckets = buildDashboardBucketSeries(filteredSales, filteredPurchases, range);
+  const financeBuckets = buildDashboardBucketSeries(filteredSales, filteredPayables.length ? filteredPayables : filteredPurchases, range);
   const productionBuckets = buildDashboardProductionSeries(filteredProduction, range);
   const commercialBuckets = buildDashboardCommercialSeries(filteredSales, range);
   const averageProductionTime = completedProduction.length
@@ -2365,13 +2666,13 @@ function buildDashboardSnapshot() {
       {
         label: "Pedidos em aberto",
         value: String(openOrdersCount),
-        variation: openOrdersCount ? `↓ ${openOrdersCount} requer acao` : "↑ Operacao sob controle",
-        note: "Pedidos ainda nao encerrados",
+        variation: openOrdersCount ? `↓ ${openOrdersCount} requer ação` : "↑ Operação sob controle",
+        note: "Pedidos ainda não encerrados",
         icon: "PD",
         tone: openOrdersCount ? "amber" : "green",
       },
       {
-        label: "Producao em andamento",
+        label: "Produção em andamento",
         value: String(activeProductionCount),
         variation: activeProductionCount ? `↑ ${activeProductionCount} ordem(ns) ativas` : "↓ Sem ordem em execucao",
         note: "Ordens rodando agora",
@@ -2398,7 +2699,7 @@ function buildDashboardSnapshot() {
     productionChart: {
       labels: productionBuckets.labels,
       series: [
-        { name: "Pecas produzidas", color: "#0f766e", values: productionBuckets.quantities },
+        { name: "Peças produzidas", color: "#0f766e", values: productionBuckets.quantities },
       ],
     },
     commercialChart: {
@@ -2420,7 +2721,7 @@ function buildDashboardSnapshot() {
       revenue,
       estimatedCosts,
       sales,
-      purchases,
+      payables: filteredPayables.length ? filteredPayables : filteredPurchases,
     }),
     criticalStock: lowStockItems.slice(0, 6),
     recentOrders: filteredSales
@@ -2570,8 +2871,8 @@ function getPreviousDashboardDateRange(range) {
 function getDashboardRangeLabel(range) {
   const dayCount = getDashboardDayDiff(range.start, range.end) + 1;
   if (dayCount <= 1) return "Hoje";
-  if (dayCount === 7) return "Ultimos 7 dias";
-  if (dayCount === 30) return "Ultimos 30 dias";
+  if (dayCount === 7) return "Últimos 7 dias";
+  if (dayCount === 30) return "Últimos 30 dias";
   return `${formatDate(range.start.toISOString().slice(0, 10))} ate ${formatDate(range.end.toISOString().slice(0, 10))}`;
 }
 
@@ -2638,8 +2939,8 @@ function getMetricToneFromValue(value) {
 
 function normalizeDashboardProductionStatus(status) {
   const normalized = String(status || "").trim().toLowerCase();
-  if (["completed", "concluida"].includes(normalized)) return "completed";
-  if (["in_progress", "em producao", "qualidade"].includes(normalized)) return "in_progress";
+  if (["completed", "concluída"].includes(normalized)) return "completed";
+  if (["in_progress", "em produção", "qualidade"].includes(normalized)) return "in_progress";
   return "planned";
 }
 
@@ -2695,7 +2996,7 @@ function findDashboardBucketIndex(dateValue, buckets) {
   return buckets.findIndex((bucket) => date.getTime() >= bucket.start.getTime() && date.getTime() <= bucket.end.getTime());
 }
 
-function buildDashboardBucketSeries(filteredSales, filteredPurchases, range) {
+function buildDashboardBucketSeries(filteredSales, filteredPayables, range) {
   const buckets = buildDashboardBucketDefinitions(range);
   const revenue = buckets.map(() => 0);
   const costs = buckets.map(() => 0);
@@ -2708,10 +3009,10 @@ function buildDashboardBucketSeries(filteredSales, filteredPurchases, range) {
     }
   });
 
-  filteredPurchases.forEach(({ purchase, metadata }) => {
-    const index = findDashboardBucketIndex(metadata.purchaseDetails.purchase_date || purchase.created_at, buckets);
+  filteredPayables.forEach(({ purchase, payable, metadata }) => {
+    const index = findDashboardBucketIndex(metadata.due_date || metadata.purchaseDetails?.purchase_date || payable?.created_at || purchase?.created_at, buckets);
     if (index >= 0) {
-      costs[index] += Number(metadata.purchaseDetails.total_amount || 0);
+      costs[index] += Number(metadata.amount || metadata.purchaseDetails?.total_amount || 0);
     }
   });
 
@@ -2766,8 +3067,8 @@ function getDashboardProductionLeadTimeDays(order) {
 
 function buildDashboardPipeline(filteredProduction) {
   const stages = [
-    { key: "corte", label: "Corte", count: 0, tone: "amber", note: "Entrada e preparacao" },
-    { key: "usinagem", label: "Usinagem", count: 0, tone: "blue", note: "Execucao em maquina" },
+    { key: "corte", label: "Corte", count: 0, tone: "amber", note: "Entrada e preparação" },
+    { key: "usinagem", label: "Usinagem", count: 0, tone: "blue", note: "Execucao em máquina" },
     { key: "montagem", label: "Montagem", count: 0, tone: "green", note: "Acabamento e montagem" },
     { key: "finalizado", label: "Finalizado", count: 0, tone: "green", note: "Entregue internamente" },
   ];
@@ -2795,21 +3096,21 @@ function buildDashboardPipeline(filteredProduction) {
 function getDashboardProductionStage(order, normalizedStatus) {
   if (normalizedStatus === "completed") return "finalizado";
   const steps = Array.isArray(order.steps) ? order.steps : [];
-  const liveIndex = steps.findIndex((step) => ["Pendente", "Em Producao", "Qualidade"].includes(step.status));
+  const liveIndex = steps.findIndex((step) => ["Pendente", "Em Produção", "Qualidade"].includes(step.status));
   if (liveIndex === 0) return "corte";
   if (liveIndex >= 2) return "montagem";
   if (liveIndex === 1) return "usinagem";
   return normalizedStatus === "in_progress" ? "usinagem" : "corte";
 }
 
-function buildDashboardFinancialSummary({ pendingPayables, pendingReceivables, revenue, estimatedCosts, sales, purchases }) {
-  const forecast7 = buildDashboardForecast(sales, purchases, 7);
-  const forecast30 = buildDashboardForecast(sales, purchases, 30);
+function buildDashboardFinancialSummary({ pendingPayables, pendingReceivables, revenue, estimatedCosts, sales, payables }) {
+  const forecast7 = buildDashboardForecast(sales, payables, 7);
+  const forecast30 = buildDashboardForecast(sales, payables, 30);
   return [
     {
       label: "Contas a pagar",
       value: pendingPayables,
-      note: "Compras e solicitacoes em aberto",
+      note: "Títulos financeiros pendentes no período",
       tone: pendingPayables ? "amber" : "green",
       isCurrency: true,
     },
@@ -2837,7 +3138,7 @@ function buildDashboardFinancialSummary({ pendingPayables, pendingReceivables, r
   ];
 }
 
-function buildDashboardForecast(sales, purchases, daysAhead) {
+function buildDashboardForecast(sales, payables, daysAhead) {
   const now = new Date();
   const end = endOfDashboardDay(addDashboardDays(now, daysAhead));
   const projectedRevenue = sales.reduce((total, { sale, metadata }) => {
@@ -2846,18 +3147,18 @@ function buildDashboardForecast(sales, purchases, daysAhead) {
     if (!date || date.getTime() < now.getTime() || date.getTime() > end.getTime()) return total;
     return total + Number(metadata.total || 0);
   }, 0);
-  const projectedCosts = purchases.reduce((total, { purchase, metadata }) => {
-    if (metadata.status === "cancelled") return total;
-    const date = parseDashboardDate(metadata.purchaseDetails.purchase_date || purchase.created_at);
+  const projectedCosts = payables.reduce((total, { purchase, payable, metadata }) => {
+    if (metadata.status === "cancelled" || metadata.status === "paid") return total;
+    const date = parseDashboardDate(metadata.due_date || metadata.purchaseDetails?.purchase_date || payable?.created_at || purchase?.created_at);
     if (!date || date.getTime() < now.getTime() || date.getTime() > end.getTime()) return total;
-    return total + Number(metadata.purchaseDetails.total_amount || 0);
+    return total + Number(metadata.amount || metadata.purchaseDetails?.total_amount || 0);
   }, 0);
   return projectedRevenue - projectedCosts;
 }
 
 function renderVpsControlModule() {
   if (!isTiUser()) {
-    return noPermissionTemplate("Acesso nao autorizado");
+    return noPermissionTemplate("Acesso não autorizado");
   }
 
   const summary = state.vpsControl.summary || {};
@@ -2887,7 +3188,7 @@ function renderVpsControlModule() {
         <div>
           <p class="eyebrow muted">Infraestrutura restrita ao TI</p>
           <h3>Controle da VPS</h3>
-          <p class="muted">Monitoramento, acoes operacionais, logs, seguranca, backup, banco e auditoria em uma unica tela.</p>
+          <p class="muted">Monitoramento, ações operacionais, logs, segurança, backup, banco e auditoria em uma única tela.</p>
         </div>
         <div class="module-head-actions">
           <button class="ghost-button secondary-surface-button" type="button" data-vps-refresh>Atualizar painel</button>
@@ -2896,34 +3197,34 @@ function renderVpsControlModule() {
       </div>
 
       <div class="summary-grid vps-summary-grid">
-        ${renderKpiCard({ label: "Supabase", value: supabaseConfigured ? "Conectado" : "Nao configurado", note: supabaseConfigured ? "Conexao principal do sistema ativa" : "Verifique supabase/config.js", icon: "SB", tone: supabaseConfigured ? "green" : "red" })}
+        ${renderKpiCard({ label: "Supabase", value: supabaseConfigured ? "Conectado" : "Não configurado", note: supabaseConfigured ? "Conexão principal do sistema ativa" : "Verifique supabase/config.js", icon: "SB", tone: supabaseConfigured ? "green" : "red" })}
         ${renderKpiCard({ label: "Status Geral", value: formatVpsStatusLabel(summary.server_status), note: "Saude consolidada da VPS", icon: "▣", tone: summary.server_status === "healthy" ? "green" : "red" })}
         ${renderKpiCard({ label: "CPU", value: `${formatPercent(summary.cpu_usage)}%`, note: "Uso atual do processador", icon: "CPU", tone: getMetricTone(summary.cpu_usage, 75, 90) })}
         ${renderKpiCard({ label: "Memoria", value: `${formatPercent(summary.memory_usage)}%`, note: "Consumo de RAM", icon: "RAM", tone: getMetricTone(summary.memory_usage, 75, 90) })}
-        ${renderKpiCard({ label: "Disco", value: `${formatPercent(summary.disk_usage)}%`, note: "Ocupacao do disco raiz", icon: "SSD", tone: getMetricTone(summary.disk_usage, 80, 92) })}
-        ${renderKpiCard({ label: "Uptime", value: escapeHtml(summary.uptime_label || "-"), note: "Tempo em operacao", icon: "UP", tone: "blue" })}
-        ${renderKpiCard({ label: "IP", value: escapeHtml(summary.server_ip || "-"), note: "Endereco principal", icon: "IP", tone: "blue" })}
+        ${renderKpiCard({ label: "Disco", value: `${formatPercent(summary.disk_usage)}%`, note: "Ocupação do disco raiz", icon: "SSD", tone: getMetricTone(summary.disk_usage, 80, 92) })}
+        ${renderKpiCard({ label: "Uptime", value: escapeHtml(summary.uptime_label || "-"), note: "Tempo em operação", icon: "UP", tone: "blue" })}
+        ${renderKpiCard({ label: "IP", value: escapeHtml(summary.server_ip || "-"), note: "Endereço principal", icon: "IP", tone: "blue" })}
         ${renderKpiCard({ label: "Sistema", value: escapeHtml(summary.operating_system || "-"), note: "Sistema operacional da VPS", icon: "OS", tone: "blue" })}
-        ${renderKpiCard({ label: "Ultima Atualizacao", value: formatDateTime(summary.updated_at), note: "Ultimo snapshot recebido", icon: "CLK", tone: "blue" })}
+        ${renderKpiCard({ label: "Última Atualização", value: formatDateTime(summary.updated_at), note: "Último snapshot recebido", icon: "CLK", tone: "blue" })}
       </div>
 
       <div class="vps-layout">
         <section class="table-card vps-card">
           <div class="dashboard-block-header">
             <div>
-              <h4>Status dos Servicos</h4>
-              <p class="muted">${onlineServices}/${services.length || 0} servicos principais online.</p>
+              <h4>Status dos Serviços</h4>
+              <p class="muted">${onlineServices}/${services.length || 0} serviços principais online.</p>
             </div>
           </div>
           <div class="vps-service-grid">
-            ${services.length ? services.map(renderVpsServiceCard).join("") : `<div class="empty-state">Nenhum servico monitorado.</div>`}
+            ${services.length ? services.map(renderVpsServiceCard).join("") : `<div class="empty-state">Nenhum serviço monitorado.</div>`}
           </div>
         </section>
 
         <section class="table-card vps-card">
           <div class="dashboard-block-header">
             <div>
-              <h4>Logs do Servidor e da Aplicacao</h4>
+              <h4>Logs do Servidor e da Aplicação</h4>
               <p class="muted">${criticalLogs} ocorrencia(s) critica(s) na consulta atual.</p>
             </div>
           </div>
@@ -2947,19 +3248,19 @@ function renderVpsControlModule() {
         <section class="table-card vps-card">
           <div class="dashboard-block-header">
             <div>
-              <h4>Aplicacoes Hospedadas</h4>
+              <h4>Aplicações Hospedadas</h4>
               <p class="muted">ERP, API e outros projetos mapeados na VPS.</p>
             </div>
           </div>
           <div class="vps-application-grid">
-            ${applications.length ? applications.map(renderVpsApplicationCard).join("") : `<div class="empty-state">Nenhuma aplicacao cadastrada.</div>`}
+            ${applications.length ? applications.map(renderVpsApplicationCard).join("") : `<div class="empty-state">Nenhuma aplicação cadastrada.</div>`}
           </div>
         </section>
 
         <section class="table-card vps-card">
           <div class="dashboard-block-header">
             <div>
-              <h4>Seguranca da VPS</h4>
+              <h4>Segurança da VPS</h4>
               <p class="muted">Firewall, portas, acessos recentes, IPs suspeitos e protecao SSH.</p>
             </div>
           </div>
@@ -2978,8 +3279,8 @@ function renderVpsControlModule() {
               <div class="permission-tag-list">${(security.suspicious_ips || []).length ? security.suspicious_ips.map((item) => `<span class="permission-tag danger-tag">${escapeHtml(item.ip || "-")}</span>`).join("") : `<span class="muted">Nenhum IP suspeito no snapshot.</span>`}</div>
             </article>
             <article class="card">
-              <strong>Usuarios SSH</strong>
-              <div class="permission-tag-list">${(security.ssh_users || []).length ? security.ssh_users.map((item) => `<span class="permission-tag">${escapeHtml(item.user || "-")}</span>`).join("") : `<span class="muted">Sem usuarios listados.</span>`}</div>
+              <strong>Usuários SSH</strong>
+              <div class="permission-tag-list">${(security.ssh_users || []).length ? security.ssh_users.map((item) => `<span class="permission-tag">${escapeHtml(item.user || "-")}</span>`).join("") : `<span class="muted">Sem usuários listados.</span>`}</div>
             </article>
           </div>
           <div class="vps-list-block">
@@ -2992,7 +3293,7 @@ function renderVpsControlModule() {
           <div class="dashboard-block-header">
             <div>
               <h4>Backups</h4>
-              <p class="muted">Historico, status atual e operacoes manuais com confirmacao.</p>
+              <p class="muted">Histórico, status atual e operações manuais com confirmação.</p>
             </div>
             <div class="module-head-actions">
               <button class="ghost-button" type="button" data-vps-action="generate_backup" data-vps-target-type="backup" data-vps-target-name="database" data-vps-payload='{"scope":"database"}' data-vps-confirm="Gerar backup manual do banco agora?">Backup do Banco</button>
@@ -3029,7 +3330,7 @@ function renderVpsControlModule() {
           <div class="dashboard-block-header">
             <div>
               <h4>Banco de Dados</h4>
-              <p class="muted">Status operacional, ultimas referencias de backup, acoes do banco e inventario das tabelas.</p>
+              <p class="muted">Status operacional, últimas referências de backup, ações do banco e inventário das tabelas.</p>
             </div>
             <div class="module-head-actions">
               <button class="ghost-button" type="button" data-vps-action="restart_database" data-vps-target-type="database" data-vps-target-name="${escapeHtml(database.engine || "database")}">Reiniciar Banco</button>
@@ -3111,7 +3412,7 @@ function renderVpsControlModule() {
                             <tr>
                               <td>${escapeHtml(column.column_name || "-")}</td>
                               <td>${escapeHtml(column.data_type || "-")}</td>
-                              <td>${column.is_nullable ? "Sim" : "Nao"}</td>
+                              <td>${column.is_nullable ? "Sim" : "Não"}</td>
                               <td>${escapeHtml(column.column_default || "-")}</td>
                             </tr>
                           `).join("") || `<tr><td colspan="4">Nenhuma coluna encontrada.</td></tr>`
@@ -3170,16 +3471,16 @@ function renderVpsControlModule() {
           <div class="dashboard-block-header">
             <div>
               <h4>Auditoria</h4>
-              <p class="muted">Historico de acoes executadas pelo TI nesta area.</p>
+              <p class="muted">Histórico de ações executadas pelo TI nesta área.</p>
             </div>
           </div>
           <div class="table-wrapper">
             <table>
               <thead>
                 <tr>
-                  <th>Usuario</th>
-                  <th>Acao</th>
-                  <th>Servico</th>
+                  <th>Usuário</th>
+                  <th>Ação</th>
+                  <th>Serviço</th>
                   <th>IP</th>
                   <th>Data/Hora</th>
                 </tr>
@@ -3193,7 +3494,7 @@ function renderVpsControlModule() {
                     <td>${escapeHtml(item.origin_ip || "-")}</td>
                     <td>${formatDateTime(item.created_at)}</td>
                   </tr>
-                `).join("") : `<tr><td colspan="5">Nenhuma acao auditada.</td></tr>`}
+                `).join("") : `<tr><td colspan="5">Nenhuma ação auditada.</td></tr>`}
               </tbody>
             </table>
           </div>
@@ -3233,9 +3534,9 @@ function renderVpsApplicationCard(app) {
         ${renderVpsHealthBadge(app.status)}
       </div>
       <p class="muted">Pasta: ${escapeHtml(app.project_path || "-")}</p>
-      <p class="muted">Ultima atualizacao: ${formatDateTime(app.last_updated_at)}</p>
+      <p class="muted">Última atualização: ${formatDateTime(app.last_updated_at)}</p>
       <div class="form-actions-row">
-        <button class="inline-button" type="button" data-vps-action="restart_application" data-vps-target-type="application" data-vps-target-name="${escapeHtml(app.app_name || "")}">Reiniciar Aplicacao</button>
+        <button class="inline-button" type="button" data-vps-action="restart_application" data-vps-target-type="application" data-vps-target-name="${escapeHtml(app.app_name || "")}">Reiniciar Aplicação</button>
       </div>
     </article>
   `;
@@ -3305,7 +3606,7 @@ function formatPercent(value) {
 
 function renderPermissionsModule() {
   if (!isPermissionsAdmin()) {
-    return noPermissionTemplate("Voce nao tem permissao para acessar esta area.");
+    return noPermissionTemplate("Você não tem permissão para acessar esta área.");
   }
 
   const users = state.moduleData.users || [];
@@ -3319,21 +3620,21 @@ function renderPermissionsModule() {
     <section class="module-panel permissions-module">
       <div class="module-head permissions-hero-head">
         <div>
-          <p class="eyebrow muted">Seguranca e governanca</p>
-          <h3>Gerenciamento de Permissoes</h3>
-          <p class="muted">Configure papeis, permissoes e funcionarios</p>
+          <p class="eyebrow muted">Segurança e governanca</p>
+          <h3>Gerenciamento de Permissões</h3>
+          <p class="muted">Configure papeis, permissões e funcionários</p>
         </div>
         <div class="module-head-actions">
-          <button class="secondary-button" type="button" data-open-employee-modal>Cadastrar Funcionario</button>
+          <button class="secondary-button" type="button" data-open-employee-modal>Cadastrar Funcionário</button>
           <button class="primary-button" type="button" data-new-permission-role>+ Novo Papel</button>
         </div>
       </div>
 
       <div class="summary-grid permissions-summary-grid">
-        ${renderKpiCard({ label: "Papeis de Permissao", value: roles.length, note: "Perfis ativos no ERP", icon: "◩", tone: "blue" })}
-        ${renderKpiCard({ label: "Funcionarios Ativos", value: activeUsers, note: "Usuarios habilitados para operar", icon: "◎", tone: "green" })}
-        ${renderKpiCard({ label: "Acessos Criticos", value: criticalUsers, note: "TI e ADMINISTRADOR", icon: "◪", tone: "amber" })}
-        ${renderKpiCard({ label: "Funcionarios Inativos", value: inactiveUsers, note: inactiveUsers ? "Usuarios desativados no cadastro" : "Nenhum registro inativo", icon: "◫", tone: "red" })}
+        ${renderKpiCard({ label: "Papeis de Permissão", value: roles.length, note: "Perfis ativos no ERP", icon: "◩", tone: "blue" })}
+        ${renderKpiCard({ label: "Funcionários Ativos", value: activeUsers, note: "Usuários habilitados para operar", icon: "◎", tone: "green" })}
+        ${renderKpiCard({ label: "Acessos Críticos", value: criticalUsers, note: "TI e ADMINISTRADOR", icon: "◪", tone: "amber" })}
+        ${renderKpiCard({ label: "Funcionários Inativos", value: inactiveUsers, note: inactiveUsers ? "Usuários desativados no cadastro" : "Nenhum registro inativo", icon: "◫", tone: "red" })}
       </div>
 
       <div class="permissions-layout">
@@ -3344,7 +3645,7 @@ function renderPermissionsModule() {
                 <div class="module-head compact-head">
                   <div>
                     <p class="eyebrow muted">Cadastro de papel</p>
-                    <h3>${state.permissionRoleDraft.id ? "Editar Papel de Permissao" : "Novo Papel de Permissao"}</h3>
+                    <h3>${state.permissionRoleDraft.id ? "Editar Papel de Permissão" : "Novo Papel de Permissão"}</h3>
                   </div>
                 </div>
                 <form id="permission-role-form" class="permissions-role-form">
@@ -3354,7 +3655,7 @@ function renderPermissionsModule() {
                     <input type="text" name="name" value="${escapeHtml(state.permissionRoleDraft.name)}" placeholder="Ex.: VENDEDOR" required />
                   </label>
                   <label>
-                    Descricao
+                    Descrição
                     <textarea name="description" placeholder="Resumo do papel e do escopo operacional.">${escapeHtml(state.permissionRoleDraft.description || "")}</textarea>
                   </label>
                   <div class="permission-module-grid">
@@ -3387,7 +3688,7 @@ function renderPermissionsModule() {
         <div class="module-head compact-head">
           <div>
             <p class="eyebrow muted">Equipe</p>
-            <h3>Funcionarios Cadastrados</h3>
+            <h3>Funcionários Cadastrados</h3>
           </div>
         </div>
         ${
@@ -3397,8 +3698,8 @@ function renderPermissionsModule() {
                 <table>
                   <thead>
                     <tr>
-                      <th>Funcionario</th>
-                      <th>Codigo</th>
+                      <th>Funcionário</th>
+                      <th>Código</th>
                       <th>Email</th>
                       <th>Departamento</th>
                       <th>Status</th>
@@ -3411,7 +3712,7 @@ function renderPermissionsModule() {
                 </table>
               </div>
             `
-            : `<div class="empty-state">Nenhum funcionario cadastrado. Clique em "Cadastrar Funcionario" para comecar.</div>`
+            : `<div class="empty-state">Nenhum funcionário cadastrado. Clique em "Cadastrar Funcionário" para começar.</div>`
         }
       </section>
 
@@ -3419,25 +3720,25 @@ function renderPermissionsModule() {
         <div class="module-head compact-head">
           <div>
             <p class="eyebrow muted">Vinculos de acesso</p>
-            <h3>Atribuir Permissoes a Usuarios</h3>
+            <h3>Atribuir Permissões a Usuários</h3>
           </div>
         </div>
         <div class="table-card">
           <table>
             <thead>
               <tr>
-                <th>Usuario</th>
+                <th>Usuário</th>
                 <th>Email</th>
                 <th>Departamento</th>
-                <th>Papel de Permissao</th>
-                <th>Acao</th>
+                <th>Papel de Permissão</th>
+                <th>Ação</th>
               </tr>
             </thead>
             <tbody>
               ${
                 users.length
                   ? users.map(renderPermissionAssignmentRow).join("")
-                  : `<tr><td colspan="5"><div class="empty-state">Nenhum usuario disponivel.</div></td></tr>`
+                  : `<tr><td colspan="5"><div class="empty-state">Nenhum usuário disponível.</div></td></tr>`
               }
             </tbody>
           </table>
@@ -3470,8 +3771,8 @@ function renderPermissionRolePermissionGrid(roleDraft) {
               : permission.module_key === "vps"
                 ? "Restrito exclusivamente ao perfil TI"
               : permission.module_key === "dashboard" && lockedDashboardEdit
-                ? "Perfis operacionais podem visualizar, mas nao editar o dashboard"
-                : "Controle de leitura e alteracao"
+                ? "Perfis operacionais podem visualizar, mas não editar o dashboard"
+                : "Controle de leitura e alteração"
           }</p>
         </div>
         <label class="permission-switch">
@@ -3501,12 +3802,12 @@ function renderPermissionRoleCard(role) {
       <div class="permission-role-card-head">
         <div>
           <h4>${escapeHtml(role.name)}</h4>
-          <p class="muted">${escapeHtml(role.description || "Sem descricao cadastrada.")}</p>
+          <p class="muted">${escapeHtml(role.description || "Sem descrição cadastrada.")}</p>
         </div>
         ${role.is_system ? `<span class="status-chip chip-blue">Sistema</span>` : ""}
       </div>
       <div class="permission-tag-list">
-        ${activeTags || `<span class="muted">Nenhuma permissao marcada.</span>`}
+        ${activeTags || `<span class="muted">Nenhuma permissão marcada.</span>`}
       </div>
       <div class="form-actions-row">
         <button class="inline-button" type="button" data-edit-permission-role="${role.id}">Editar</button>
@@ -3521,7 +3822,7 @@ function renderPermissionUserRow(user) {
     <tr>
       <td>
         <strong>${escapeHtml(user.full_name)}</strong>
-        <div class="table-inline-copy muted">${escapeHtml(user.permission_role_name || "Sem papel de permissao")}</div>
+        <div class="table-inline-copy muted">${escapeHtml(user.permission_role_name || "Sem papel de permissão")}</div>
       </td>
       <td>${escapeHtml(user.login_code || "-")}</td>
       <td>${escapeHtml(user.email || "-")}</td>
@@ -3563,27 +3864,27 @@ function renderEmployeeModal() {
 
   return `
     <div class="modal-overlay" data-close-employee-modal>
-      <div class="modal-card" role="dialog" aria-modal="true" aria-label="Cadastrar funcionario" data-modal-card>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-label="Cadastrar funcionário" data-modal-card>
         <div class="module-head compact-head">
           <div>
-            <p class="eyebrow muted">Cadastro de funcionario</p>
-            <h3>${state.employeeFormMode === "edit" ? "Editar Funcionario" : "Cadastrar Funcionario"}</h3>
+            <p class="eyebrow muted">Cadastro de funcionário</p>
+            <h3>${state.employeeFormMode === "edit" ? "Editar Funcionário" : "Cadastrar Funcionário"}</h3>
           </div>
         </div>
         <form id="employee-form" class="permissions-employee-form">
           <input type="hidden" name="user_id" value="${escapeHtml(state.employeeDraft.id)}" />
           <div class="product-form-row">
-            <label>Codigo de Acesso *<input type="text" name="login_code" maxlength="3" pattern="[0-9]{3}" value="${escapeHtml(state.employeeDraft.login_code)}" required /></label>
+            <label>Código de Acesso *<input type="text" name="login_code" maxlength="3" pattern="[0-9]{3}" value="${escapeHtml(state.employeeDraft.login_code)}" required /></label>
             <label>Nome Completo *<input type="text" name="full_name" value="${escapeHtml(state.employeeDraft.full_name)}" required /></label>
           </div>
           <div class="product-form-row">
             <label>Email<input type="email" name="email" value="${escapeHtml(state.employeeDraft.email)}" placeholder="email@empresa.com" /></label>
-            <label>Senha ${state.employeeFormMode === "edit" ? "" : "*"}<input type="password" name="password" placeholder="${state.employeeFormMode === "edit" ? "Nova senha do funcionario" : "Minimo 6 caracteres"}" ${state.employeeFormMode === "edit" ? "" : "required"} /></label>
+            <label>Senha ${state.employeeFormMode === "edit" ? "" : "*"}<input type="password" name="password" placeholder="${state.employeeFormMode === "edit" ? "Nova senha do funcionário" : "Mínimo 6 caracteres"}" ${state.employeeFormMode === "edit" ? "" : "required"} /></label>
           </div>
-          ${state.employeeFormMode === "edit" ? `<p class="hint">TI pode redefinir a senha de qualquer funcionario por este formulario. ADMINISTRADOR tambem pode alterar a senha durante a edicao. Deixe em branco para manter a senha atual.</p>` : ""}
+          ${state.employeeFormMode === "edit" ? `<p class="hint">TI pode redefinir a senha de qualquer funcionário por este formulario. ADMINISTRADOR tambem pode alterar a senha durante a edicao. Deixe em branco para manter a senha atual.</p>` : ""}
           <div class="product-form-row">
             <label>Departamento<select name="department" required>${departmentOptions}</select></label>
-            <label>Papel de Permissao<select name="permission_role_id" required><option value="">Selecione</option>${permissionRoleOptions}</select></label>
+            <label>Papel de Permissão<select name="permission_role_id" required><option value="">Selecione</option>${permissionRoleOptions}</select></label>
           </div>
           <div class="product-form-row">
             <label>Status<select name="status"><option value="active" ${state.employeeDraft.status === "active" ? "selected" : ""}>Ativo</option><option value="inactive" ${state.employeeDraft.status === "inactive" ? "selected" : ""}>Inativo</option></select></label>
@@ -3605,8 +3906,15 @@ function renderBomModule() {
   const filteredMaterials = materials.filter((item) => {
     const term = state.bomMaterialSearch.trim().toLowerCase();
     if (!term) return true;
-    return [item.code, item.name, item.description, item.supplier].some((value) =>
+    return [item.code, item.name, item.description, item.category, item.supplier].some((value) =>
       String(value || "").toLowerCase().includes(term)
+    );
+  });
+  const structureTerm = String(state.bomStructureSearch || "").trim().toLowerCase();
+  const filteredStructures = structures.filter((item) => {
+    if (!structureTerm) return true;
+    return [item.code, item.name, item.category, item.version, item.product_name, item.product_code, item.instructions].some((value) =>
+      String(value || "").toLowerCase().includes(structureTerm)
     );
   });
   const totalStructureCost = calculateBomDraftTotal();
@@ -3617,12 +3925,12 @@ function renderBomModule() {
         <div>
           <p class="eyebrow muted">Bill of Materials</p>
           <h3>BOM - Estrutura de Produtos</h3>
-          <p class="muted">Receita industrial com materiais base, subconjuntos e custo consolidado por versao.</p>
+          <p class="muted">Receita industrial com materiais base, subconjuntos e custo consolidado por versão.</p>
         </div>
         <div class="module-head-actions">
           ${
             canEdit && state.bomTab === "materials"
-              ? `<button class="primary-button" type="button" data-bom-material-create>Nova Peca/Material</button>`
+              ? `<button class="primary-button" type="button" data-bom-material-create>Nova Peça/Material</button>`
               : ""
           }
           ${
@@ -3635,9 +3943,9 @@ function renderBomModule() {
 
       <div class="summary-grid">
         ${renderKpiCard({
-          label: "Pecas e Materiais",
+          label: "Peças e Materiais",
           value: materials.length,
-          note: materials.length ? "Base tecnica cadastrada" : "Nenhum item cadastrado",
+          note: materials.length ? "Base técnica cadastrada" : "Nenhum item cadastrado",
           icon: "⊞",
           tone: "blue",
         })}
@@ -3651,14 +3959,14 @@ function renderBomModule() {
         ${renderKpiCard({
           label: "Rascunhos",
           value: structures.filter((item) => item.status === "draft").length,
-          note: "Edicao liberada antes da ativacao",
+          note: "Edicao liberada antes da ativação",
           icon: "◩",
           tone: "amber",
         })}
       </div>
 
       <div class="bom-tabs">
-        <button class="bom-tab-button ${state.bomTab === "materials" ? "active" : ""}" type="button" data-bom-tab="materials">Pecas / Materiais</button>
+        <button class="bom-tab-button ${state.bomTab === "materials" ? "active" : ""}" type="button" data-bom-tab="materials">Peças / Materiais</button>
         <button class="bom-tab-button ${state.bomTab === "structures" ? "active" : ""}" type="button" data-bom-tab="structures">Conjuntos (BOM)</button>
       </div>
 
@@ -3670,23 +3978,23 @@ function renderBomModule() {
                 ? state.bomMaterialFormVisible
                   ? renderBomMaterialsForm()
                   : ""
-                : `<div class="empty-state">Seu perfil pode visualizar este modulo, mas nao pode editar.</div>`
+                : `<div class="empty-state">Seu perfil pode visualizar este módulo, mas não pode editar.</div>`
             }
             <section class="module-subpanel">
               <div class="module-head compact-head">
                 <div>
                   <p class="eyebrow muted">Consulta</p>
-                  <h3>Pecas cadastradas</h3>
+                  <h3>Peças cadastradas</h3>
                 </div>
               </div>
               <div class="table-actions single-search-row">
                 <label>
-                  Buscar pecas...
-                  <input id="bom-material-search" type="text" placeholder="Buscar pecas..." value="${escapeHtml(state.bomMaterialSearch)}" />
+                  Buscar peças...
+                  <input id="bom-material-search" type="text" placeholder="Buscar peças..." value="${escapeHtml(state.bomMaterialSearch)}" />
                 </label>
               </div>
               ${renderTable(
-                ["Codigo", "Nome", "Descricao", "Categoria", "Unidade", "Custo", "Fornecedor", "Estoque", "Minimo", "Status", "Acao"],
+                ["Código", "Nome", "Descrição", "Categoria", "Unidade", "Custo", "Fornecedor", "Estoque", "Mínimo", "Status", "Ação"],
                 filteredMaterials.map((item) => [
                   item.code,
                   item.name,
@@ -3709,7 +4017,7 @@ function renderBomModule() {
                 ? state.bomStructureFormVisible
                   ? renderBomStructuresForm(totalStructureCost)
                   : ""
-                : `<div class="empty-state">Seu perfil pode visualizar este modulo, mas nao pode editar.</div>`
+                : `<div class="empty-state">Seu perfil pode visualizar este módulo, mas não pode editar.</div>`
             }
             <section class="module-subpanel">
               <div class="module-head compact-head">
@@ -3718,11 +4026,18 @@ function renderBomModule() {
                   <h3>Conjuntos BOM</h3>
                 </div>
               </div>
+              <div class="table-actions single-search-row">
+                <label>
+                  Buscar conjunto...
+                  <input id="bom-structure-search" type="text" placeholder="Buscar conjunto..." value="${escapeHtml(state.bomStructureSearch || "")}" />
+                </label>
+              </div>
               ${renderTable(
-                ["Codigo", "Nome", "Versao", "Lote", "Status", "Custo Total", "Itens", "Instrucoes", "Acao"],
-                structures.map((item) => [
+                ["Código", "Nome", "Categoria", "Versao", "Lote", "Status", "Custo Total", "Itens", "Instruções", "Ação"],
+                filteredStructures.map((item) => [
                   item.code,
                   item.name,
+                  formatBomCategory(item.category),
                   item.version,
                   `${formatQuantity(item.batch_size)} ${item.batch_unit}`,
                   bomStructureStatusCell(item.status),
@@ -3750,22 +4065,22 @@ function renderInventoryModule() {
     <section class="module-panel">
       <div class="module-head">
         <div>
-          <p class="eyebrow muted">Movimentacoes e controle de saldo</p>
+          <p class="eyebrow muted">Movimentações e controle de saldo</p>
           <h3>Estoque</h3>
-          <p class="muted">Historico completo de entradas, saidas e ajustes com atualizacao automatica do saldo.</p>
+          <p class="muted">Histórico completo de entradas, saídas e ajustes com atualização automática do saldo.</p>
         </div>
         ${
           canEdit
-            ? `<button class="primary-button" type="button" data-inventory-create>Nova Movimentacao</button>`
+            ? `<button class="primary-button" type="button" data-inventory-create>Nova Movimentação</button>`
             : ""
         }
       </div>
 
       <div class="summary-grid">
         ${renderKpiCard({
-          label: "Movimentacoes",
+          label: "Movimentações",
           value: movements.length,
-          note: movements.length ? "Historico total registrado" : "Nenhuma movimentacao registrada",
+          note: movements.length ? "Histórico total registrado" : "Nenhuma movimentação registrada",
           icon: "◬",
           tone: "blue",
         })}
@@ -3777,9 +4092,9 @@ function renderInventoryModule() {
           tone: "green",
         })}
         ${renderKpiCard({
-          label: "Saidas",
+          label: "Saídas",
           value: exitCount,
-          note: exitCount ? "Baixas de estoque realizadas" : "Sem saidas registradas",
+          note: exitCount ? "Baixas de estoque realizadas" : "Sem saídas registradas",
           icon: "↘",
           tone: "red",
         })}
@@ -3796,7 +4111,7 @@ function renderInventoryModule() {
         state.inventoryFormVisible && canEdit
           ? renderInventoryMovementForm()
           : !canEdit
-            ? `<div class="empty-state">Seu perfil pode visualizar este modulo, mas nao pode editar.</div>`
+            ? `<div class="empty-state">Seu perfil pode visualizar este módulo, mas não pode editar.</div>`
             : ""
       }
 
@@ -3808,7 +4123,7 @@ function renderInventoryModule() {
               <th>Produto</th>
               <th>Tipo</th>
               <th>Quantidade</th>
-              <th>Observacao</th>
+              <th>Observação</th>
               <th>Movimentado por</th>
               <th>Data</th>
             </tr>
@@ -3823,13 +4138,15 @@ function renderInventoryModule() {
                           <td>${formatShortId(item.id)}</td>
                           <td>
                             <strong>${item.product_name}</strong>
-                            <div class="table-inline-copy muted">${item.product_code || "-"}</div>
+                            ${item.sale_option_label ? `<div class="table-inline-copy">${escapeHtml(item.sale_option_label)}</div>` : ""}
+                            ${renderInventoryMovementBomDescription(item) || ""}
+                            <div class="table-inline-copy muted">${item.sale_option_code || item.product_code || "-"}</div>
                           </td>
                           <td>${inventoryMovementTypeCell(item.movement_type)}</td>
                           <td>${formatQuantity(item.quantity)}</td>
                           <td>
                             ${item.notes || "-"}
-                            <div class="table-inline-copy muted">Serie ${item.machine_serial || "-"} | Lote ${item.batch || "-"}</div>
+                            <div class="table-inline-copy muted">Série ${item.machine_serial || "-"} | Lote ${item.batch || "-"}</div>
                           </td>
                           <td>${item.moved_by_name ? escapeHtml(item.moved_by_name) : "-"}</td>
                           <td>${formatDateTime(item.created_at)}</td>
@@ -3837,7 +4154,7 @@ function renderInventoryModule() {
                       `
                     )
                     .join("")
-                : `<tr><td colspan="7"><div class="empty-state">Nenhuma movimentacao encontrada.</div></td></tr>`
+                : `<tr><td colspan="7"><div class="empty-state">Nenhuma movimentação encontrada.</div></td></tr>`
             }
           </tbody>
         </table>
@@ -3848,7 +4165,7 @@ function renderInventoryModule() {
 
 function renderAuditModule() {
   if (!hasPermission("audit", "view")) {
-    return noPermissionTemplate("Seu perfil nao possui acesso ao modulo de auditoria.");
+    return noPermissionTemplate("Seu perfil não possui acesso ao módulo de auditoria.");
   }
 
   const logs = state.moduleData.auditLogs || [];
@@ -3865,7 +4182,7 @@ function renderAuditModule() {
         <div>
           <p class="eyebrow muted">Auditoria centralizada</p>
           <h3>Central de Logs</h3>
-          <p class="muted">Registros unificados por modulo com filtros operacionais e rastreabilidade completa.</p>
+          <p class="muted">Registros unificados por módulo com filtros operacionais e rastreabilidade completa.</p>
         </div>
         <div class="module-head-actions">
           <button class="ghost-button" type="button" data-audit-refresh>Atualizar</button>
@@ -3874,25 +4191,25 @@ function renderAuditModule() {
       </div>
 
       <div class="summary-grid">
-        ${renderKpiCard({ label: "Logs carregados", value: logs.length, note: logs.length ? "Ultimos 500 registros filtrados" : "Nenhum registro encontrado", icon: "◰", tone: "blue" })}
-        ${renderKpiCard({ label: "Criticos", value: logs.filter((item) => item.nivel === "Critico").length, note: "Eventos de alto impacto", icon: "!", tone: "red" })}
-        ${renderKpiCard({ label: "Atencao", value: logs.filter((item) => item.nivel === "Atencao").length, note: "Eventos com alerta operacional", icon: "•", tone: "amber" })}
-        ${renderKpiCard({ label: "Modulos ativos", value: new Set(logs.map((item) => item.modulo).filter(Boolean)).size, note: "Categorias presentes no filtro atual", icon: "⊞", tone: "green" })}
+        ${renderKpiCard({ label: "Logs carregados", value: logs.length, note: logs.length ? "Últimos 500 registros filtrados" : "Nenhum registro encontrado", icon: "◰", tone: "blue" })}
+        ${renderKpiCard({ label: "Críticos", value: logs.filter((item) => item.nivel === "Critico").length, note: "Eventos de alto impacto", icon: "!", tone: "red" })}
+        ${renderKpiCard({ label: "Atenção", value: logs.filter((item) => item.nivel === "Atenção").length, note: "Eventos com alerta operacional", icon: "•", tone: "amber" })}
+        ${renderKpiCard({ label: "Módulos ativos", value: new Set(logs.map((item) => item.modulo).filter(Boolean)).size, note: "Categorias presentes no filtro atual", icon: "⊞", tone: "green" })}
       </div>
 
       <form id="audit-filter-form" class="table-actions audit-filter-grid">
-        <label>Modulo<select name="module"><option value="all">Todos</option>${renderOptions(moduleOptions, state.auditFilters.module)}</select></label>
-        <label>Usuario<select name="user"><option value="all">Todos</option>${renderOptions(userOptions, state.auditFilters.user)}</select></label>
-        <label>Acao<select name="action"><option value="all">Todas</option>${renderOptions(actionOptions, state.auditFilters.action)}</select></label>
-        <label>Nivel<select name="level">${renderOptions([
+        <label>Módulo<select name="module"><option value="all">Todos</option>${renderOptions(moduleOptions, state.auditFilters.module)}</select></label>
+        <label>Usuário<select name="user"><option value="all">Todos</option>${renderOptions(userOptions, state.auditFilters.user)}</select></label>
+        <label>Ação<select name="action"><option value="all">Todas</option>${renderOptions(actionOptions, state.auditFilters.action)}</select></label>
+        <label>Nível<select name="level">${renderOptions([
           { value: "all", label: "Todos" },
           { value: "Informativo", label: "Informativo" },
-          { value: "Atencao", label: "Atencao" },
+          { value: "Atenção", label: "Atenção" },
           { value: "Critico", label: "Critico" },
         ], state.auditFilters.level)}</select></label>
         <label>Data inicial<input name="date_from" type="date" value="${escapeHtml(state.auditFilters.date_from)}" /></label>
         <label>Data final<input name="date_to" type="date" value="${escapeHtml(state.auditFilters.date_to)}" /></label>
-        <label class="audit-filter-search">Busca textual<input name="search" type="text" placeholder="Buscar por item, descricao, usuario ou acao..." value="${escapeHtml(state.auditFilters.search)}" /></label>
+        <label class="audit-filter-search">Busca textual<input name="search" type="text" placeholder="Buscar por item, descrição, usuário ou ação..." value="${escapeHtml(state.auditFilters.search)}" /></label>
         <div class="form-actions-row">
           <button class="ghost-button" type="button" data-audit-reset>Limpar</button>
           <button class="primary-button" type="submit">Filtrar</button>
@@ -3905,11 +4222,11 @@ function renderAuditModule() {
             <thead>
               <tr>
                 <th>Data</th>
-                <th>Modulo</th>
-                <th>Acao</th>
-                <th>Usuario</th>
+                <th>Módulo</th>
+                <th>Ação</th>
+                <th>Usuário</th>
                 <th>Item</th>
-                <th>Nivel</th>
+                <th>Nível</th>
                 <th></th>
               </tr>
             </thead>
@@ -3944,17 +4261,17 @@ function renderAuditModule() {
                   </div>
                 </div>
                 <div class="audit-detail-grid">
-                  <div><span>Modulo</span><strong>${escapeHtml(getModuleLabel(selectedLog.modulo))}</strong></div>
-                  <div><span>Usuario</span><strong>${escapeHtml(selectedLog.usuario_nome || "-")}</strong></div>
+                  <div><span>Módulo</span><strong>${escapeHtml(getModuleLabel(selectedLog.modulo))}</strong></div>
+                  <div><span>Usuário</span><strong>${escapeHtml(selectedLog.usuario_nome || "-")}</strong></div>
                   <div><span>Perfil</span><strong>${escapeHtml(selectedLog.usuario_perfil || "-")}</strong></div>
                   <div><span>Data/Hora</span><strong>${escapeHtml(formatDateTime(selectedLog.created_at))}</strong></div>
                   <div><span>IP</span><strong>${escapeHtml(selectedLog.ip || "-")}</strong></div>
-                  <div><span>Nivel</span><strong>${escapeHtml(selectedLog.nivel || "-")}</strong></div>
+                  <div><span>Nível</span><strong>${escapeHtml(selectedLog.nivel || "-")}</strong></div>
                   <div><span>Item afetado</span><strong>${escapeHtml(selectedLog.item_afetado || "-")}</strong></div>
                   <div><span>Entidade</span><strong>${escapeHtml(selectedLog.entidade_tipo || "-")} ${escapeHtml(selectedLog.entidade_id || "")}</strong></div>
                 </div>
                 <section class="form-section">
-                  <h4>Descricao</h4>
+                  <h4>Descrição</h4>
                   <p class="audit-detail-description">${escapeHtml(selectedLog.descricao || "-")}</p>
                 </section>
                 <section class="form-section">
@@ -3972,7 +4289,7 @@ function renderAuditModule() {
 
 function renderMachiningModule() {
   if (!hasPermission("machining", "view")) {
-    return noPermissionTemplate("Seu perfil nao possui acesso ao modulo de usinagem.");
+    return noPermissionTemplate("Seu perfil não possui acesso ao módulo de usinagem.");
   }
 
   const canEdit = hasPermission("machining", "edit");
@@ -3986,7 +4303,7 @@ function renderMachiningModule() {
     return matchesSearch && matchesStatus;
   });
   const inRegistration = pieces.filter((piece) => piece.status === "Cadastro").length;
-  const inProduction = pieces.filter((piece) => piece.status === "Em Producao").length;
+  const inProduction = pieces.filter((piece) => piece.status === "Em Produção").length;
   const finished = pieces.filter((piece) => piece.status === "Finalizada").length;
 
   return `
@@ -3994,8 +4311,8 @@ function renderMachiningModule() {
       <div class="module-head machining-head">
         <div>
           <p class="eyebrow muted">Usinagem</p>
-          <h3>Pecas &amp; Processos de Usinagem</h3>
-          <p class="muted">${pieces.length} peca(s) cadastrada(s)</p>
+          <h3>Peças &amp; Processos de Usinagem</h3>
+          <p class="muted">${pieces.length} peça(s) cadastrada(s)</p>
         </div>
         <div class="module-head-actions">
           ${canEdit ? `
@@ -4004,7 +4321,7 @@ function renderMachiningModule() {
               type="button"
               data-machining-toggle-form
             >
-              <span>+ Nova Peca</span>
+              <span>+ Nova Peça</span>
               <span class="production-toggle-icon">${isFormOpen ? "▴" : "▾"}</span>
             </button>
           ` : ""}
@@ -4013,21 +4330,21 @@ function renderMachiningModule() {
 
       <div class="summary-grid">
         ${renderKpiCard({
-          label: "Pecas Cadastradas",
+          label: "Peças Cadastradas",
           value: pieces.length,
-          note: pieces.length ? "Cadastro tecnico pronto para producao" : "Nenhuma peca cadastrada",
+          note: pieces.length ? "Cadastro técnico pronto para produção" : "Nenhuma peça cadastrada",
           icon: "◈",
           tone: "blue",
         })}
         ${renderKpiCard({
           label: "Em Cadastro",
           value: inRegistration,
-          note: inRegistration ? "Pecas aguardando envio para producao" : "Sem cadastro pendente",
+          note: inRegistration ? "Peças aguardando envio para produção" : "Sem cadastro pendente",
           icon: "⊞",
           tone: "amber",
         })}
         ${renderKpiCard({
-          label: "Em Producao",
+          label: "Em Produção",
           value: inProduction,
           note: inProduction ? "Ordens em execucao por etapas" : "Nenhuma ordem ativa",
           icon: "◭",
@@ -4036,7 +4353,7 @@ function renderMachiningModule() {
         ${renderKpiCard({
           label: "Finalizadas",
           value: finished,
-          note: finished ? "Pecas ja integradas ao estoque" : "Sem pecas concluidas",
+          note: finished ? "Peças já integradas ao estoque" : "Sem peças concluídas",
           icon: "◬",
           tone: "red",
         })}
@@ -4051,7 +4368,7 @@ function renderMachiningModule() {
               </div>
             </div>
           `
-          : `<div class="empty-state">Seu perfil pode visualizar este modulo, mas nao pode editar.</div>`
+          : `<div class="empty-state">Seu perfil pode visualizar este módulo, mas não pode editar.</div>`
       }
 
       <div class="table-actions machining-filters-row">
@@ -4060,7 +4377,7 @@ function renderMachiningModule() {
           <input
             id="machining-search-input"
             type="text"
-            placeholder="Buscar por codigo, nome ou material..."
+            placeholder="Buscar por código, nome ou material..."
             value="${escapeHtml(state.machiningSearch)}"
           />
         </label>
@@ -4071,7 +4388,7 @@ function renderMachiningModule() {
             ${renderOptions([
               { value: "all", label: "Todas" },
               { value: "Cadastro", label: "Cadastro" },
-              { value: "Em Producao", label: "Em Producao" },
+              { value: "Em Produção", label: "Em Produção" },
               { value: "Finalizada", label: "Finalizada" },
             ], state.machiningStatusFilter)}
           </select>
@@ -4086,7 +4403,7 @@ function renderMachiningModule() {
               <div class="table-card machining-empty-card">
                 <div class="production-empty-state">
                   <div class="production-empty-icon">◈</div>
-                  <strong>Nenhuma peca encontrada</strong>
+                  <strong>Nenhuma peça encontrada</strong>
                 </div>
               </div>
             `
@@ -4103,9 +4420,9 @@ function renderMachiningForm() {
   return `
     <div class="machining-form-header">
       <div>
-        <p class="eyebrow muted">Nova Peca</p>
-        <h4>${state.machiningDraft.edit_id ? "Editar Peca" : "Nova Peca"}</h4>
-        <p class="muted">Dados da peca e processos de fabricacao em sequencia controlada.</p>
+        <p class="eyebrow muted">Nova Peça</p>
+        <h4>${state.machiningDraft.edit_id ? "Editar Peça" : "Nova Peça"}</h4>
+        <p class="muted">Dados da peça e processos de fabricação em sequência controlada.</p>
       </div>
       <div class="machining-form-summary">
         <span>${processCount} processo(s)</span>
@@ -4117,14 +4434,14 @@ function renderMachiningForm() {
       <input type="hidden" name="edit_id" value="${escapeHtml(state.machiningDraft.edit_id)}" />
 
       <div class="form-section">
-        <h4>Dados da peca</h4>
+        <h4>Dados da peça</h4>
         <div class="machining-form-row">
           <label>
-            Codigo *
+            Código *
             <input name="code" type="text" required value="${escapeHtml(state.machiningDraft.code)}" />
           </label>
           <label>
-            Nome da Peca *
+            Nome da Peça *
             <input name="name" type="text" required value="${escapeHtml(state.machiningDraft.name)}" />
           </label>
           <label>
@@ -4140,8 +4457,8 @@ function renderMachiningForm() {
         </div>
         <div class="machining-form-row machining-form-row-full">
           <label>
-            Descricao
-            <textarea name="description" placeholder="Detalhes tecnicos da peca">${escapeHtml(state.machiningDraft.description)}</textarea>
+            Descrição
+            <textarea name="description" placeholder="Detalhes técnicos da peça">${escapeHtml(state.machiningDraft.description)}</textarea>
           </label>
         </div>
       </div>
@@ -4149,8 +4466,8 @@ function renderMachiningForm() {
       <div class="form-section">
         <div class="machining-process-header">
           <div>
-            <h4>Processos de Fabricacao</h4>
-            <p class="muted">Cadastre ate 8 etapas na ordem em que a producao deve acontecer.</p>
+            <h4>Processos de Fabricação</h4>
+            <p class="muted">Cadastre ate 8 etapas na ordem em que a produção deve acontecer.</p>
           </div>
           <button
             class="inline-button"
@@ -4196,7 +4513,7 @@ function renderMachiningProcessDraftRow(process, index) {
           <input data-machining-process-field="name" data-machining-process-index="${index}" type="text" value="${escapeHtml(process.name)}" placeholder="Ex.: Corte" />
         </label>
         <label>
-          Maquina
+          Máquina
           <input data-machining-process-field="machine" data-machining-process-index="${index}" type="text" value="${escapeHtml(process.machine)}" />
         </label>
         <label>
@@ -4211,8 +4528,8 @@ function renderMachiningProcessDraftRow(process, index) {
 
       <div class="machining-process-grid machining-process-grid-notes">
         <label>
-          Observacoes
-          <textarea data-machining-process-field="notes" data-machining-process-index="${index}" placeholder="Informacoes operacionais">${escapeHtml(process.notes)}</textarea>
+          Observações
+          <textarea data-machining-process-field="notes" data-machining-process-index="${index}" placeholder="Informações operacionais">${escapeHtml(process.notes)}</textarea>
         </label>
       </div>
     </article>
@@ -4238,14 +4555,14 @@ function renderMachiningPieceCard(piece, canEdit) {
           </div>
 
           <div class="machining-piece-meta">
-            <span>${escapeHtml(piece.material || "Material nao informado")}</span>
+            <span>${escapeHtml(piece.material || "Material não informado")}</span>
             <span>${processCount} processo(s)</span>
             <span>${formatMinutesLabel(piece.total_minutes)}</span>
           </div>
 
           <div class="machining-piece-kpis">
             <div>
-              <span>Codigo</span>
+              <span>Código</span>
               <strong>${escapeHtml(piece.code)}</strong>
             </div>
             <div>
@@ -4253,8 +4570,8 @@ function renderMachiningPieceCard(piece, canEdit) {
               <strong>${escapeHtml(piece.material || "-")}</strong>
             </div>
             <div>
-              <span>Ultima producao</span>
-              <strong>${latestOrder ? escapeHtml(latestOrder.lot) : "Nao iniciada"}</strong>
+              <span>Última produção</span>
+              <strong>${latestOrder ? escapeHtml(latestOrder.lot) : "Não iniciada"}</strong>
             </div>
             <div>
               <span>Etapa atual</span>
@@ -4264,7 +4581,7 @@ function renderMachiningPieceCard(piece, canEdit) {
         </div>
 
         <div class="machining-piece-actions">
-          ${canEdit ? `<button class="primary-button" type="button" data-machining-start-production="${piece.id}">Enviar para Producao</button>` : ""}
+          ${canEdit ? `<button class="primary-button" type="button" data-machining-start-production="${piece.id}">Enviar para Produção da Usinagem</button>` : ""}
           ${canEdit ? `<button class="inline-button" type="button" data-machining-edit-id="${piece.id}">Editar</button>` : ""}
           ${canEdit ? `<button class="inline-button danger-button" type="button" data-machining-delete-id="${piece.id}">Excluir</button>` : ""}
           <button class="ghost-button" type="button" data-machining-toggle-details="${piece.id}">
@@ -4296,8 +4613,8 @@ function renderMachiningStartProductionForm(piece) {
   return `
     <div class="machining-inline-head">
       <div>
-        <h4>Iniciar producao por etapas</h4>
-        <p class="muted">Toda nova producao exige quantidade e lote obrigatorios.</p>
+        <h4>Iniciar produção por etapas</h4>
+        <p class="muted">Toda nova produção exige quantidade e lote obrigatórios.</p>
       </div>
     </div>
 
@@ -4321,7 +4638,7 @@ function renderMachiningStartProductionForm(piece) {
       </label>
       <div class="form-actions-row machining-form-actions">
         <button class="ghost-button" type="button" data-machining-close-inline>Cancelar</button>
-        <button class="primary-button" type="submit">Iniciar Producao</button>
+        <button class="primary-button" type="submit">Iniciar Produção</button>
       </div>
     </form>
   `;
@@ -4335,8 +4652,8 @@ function renderMachiningPieceDetails(piece) {
   return `
     <div class="machining-inline-head">
       <div>
-        <h4>Detalhes da peca</h4>
-        <p class="muted">${escapeHtml(piece.description || "Sem descricao cadastrada.")}</p>
+        <h4>Detalhes da peça</h4>
+        <p class="muted">${escapeHtml(piece.description || "Sem descrição cadastrada.")}</p>
       </div>
     </div>
 
@@ -4349,7 +4666,7 @@ function renderMachiningPieceDetails(piece) {
       </section>
 
       <section class="form-section">
-        <h4>Producao atual</h4>
+        <h4>Produção atual</h4>
         ${
           latestOrder
             ? `
@@ -4379,13 +4696,13 @@ function renderMachiningPieceDetails(piece) {
                 ${visibleSteps.map(({ step, index }) => renderMachiningOrderStepItem(piece.id, latestOrder.id, step, index, canStepAction(latestOrder, step))).join("")}
               </div>
             `
-            : `<div class="empty-state">Nenhuma producao iniciada para esta peca.</div>`
+            : `<div class="empty-state">Nenhuma produção iniciada para esta peça.</div>`
         }
       </section>
     </div>
 
     <section class="form-section">
-      <h4>Historico de estoque</h4>
+      <h4>Histórico de estoque</h4>
       ${
         stockEntries.length
           ? `
@@ -4398,7 +4715,7 @@ function renderMachiningPieceDetails(piece) {
               `).join("")}
             </div>
           `
-          : `<div class="empty-state">A peca entra no estoque somente apos concluir todas as etapas.</div>`
+          : `<div class="empty-state">A peça entra no estoque somente após concluir todas as etapas.</div>`
       }
     </section>
   `;
@@ -4411,7 +4728,7 @@ function renderMachiningProcessTimelineItem(process, index) {
       <div class="machining-stage-copy">
         <strong>${escapeHtml(process.name)}</strong>
         <span class="muted">
-          ${escapeHtml(process.machine || "Maquina nao informada")} •
+          ${escapeHtml(process.machine || "Máquina não informada")} •
           ${formatMinutesLabel(process.estimated_minutes)}
         </span>
       </div>
@@ -4426,7 +4743,7 @@ function renderMachiningOrderStepItem(pieceId, orderId, step, index, actionState
       <div class="machining-stage-copy">
         <strong>${escapeHtml(step.name)}</strong>
         <span class="muted">
-          ${escapeHtml(step.machine || "Maquina nao informada")} •
+          ${escapeHtml(step.machine || "Máquina não informada")} •
           ${formatMinutesLabel(step.estimated_minutes)}
           ${step.completed_at ? ` • Finalizada em ${formatDateTime(step.completed_at)}` : ""}
         </span>
@@ -4454,13 +4771,12 @@ function renderMachiningOrderStepItem(pieceId, orderId, step, index, actionState
 
 function renderProductionModule() {
   if (!hasPermission("production", "view")) {
-    return noPermissionTemplate("Seu perfil nao possui acesso ao modulo de producao.");
+    return noPermissionTemplate("Seu perfil não possui acesso ao módulo de produção.");
   }
 
   const canEdit = hasPermission("production", "edit");
   const isFormOpen = state.openAccordionKey === "production-order-form";
   const products = state.moduleData.products || [];
-  const machiningOrders = getProductionMachiningOrders();
   const searchTerm = state.productionSearch.trim().toLowerCase();
   const filteredOrders = (state.moduleData.production || []).filter((item) => {
     const metadata = getProductionOrderMetadata(item);
@@ -4480,9 +4796,9 @@ function renderProductionModule() {
     <section class="module-panel production-module">
       <div class="module-head production-head">
         <div>
-          <p class="eyebrow muted">Producao</p>
-          <h3>Ordens de producao</h3>
-          <p class="muted">Gerencie ordens de producao.</p>
+          <p class="eyebrow muted">Produção</p>
+          <h3>Ordens de produção</h3>
+          <p class="muted">Gerencie ordens de produção.</p>
         </div>
         <div class="module-head-actions">
           ${canEdit ? `
@@ -4507,8 +4823,8 @@ function renderProductionModule() {
               <div class="production-accordion-card">
                 <div class="production-form-header">
                   <div>
-                    <h4>${state.productionDraft.edit_id ? "Editar Ordem de Producao" : "Nova Ordem de Producao"}</h4>
-                    <p class="muted">Fluxo em accordion com integracao aos produtos cadastrados.</p>
+                    <h4>${state.productionDraft.edit_id ? "Editar Ordem de Produção" : "Nova Ordem de Produção"}</h4>
+                    <p class="muted">Fluxo em accordion com integração aos produtos cadastrados.</p>
                   </div>
                 </div>
                 <form id="production-form" class="production-form-grid">
@@ -4533,7 +4849,7 @@ function renderProductionModule() {
                     </label>
 
                     <label>
-                      Codigo
+                      Código
                       <input
                         name="order_number"
                         type="text"
@@ -4596,7 +4912,7 @@ function renderProductionModule() {
 
                   <div class="production-form-row production-form-row-full">
                     <label>
-                      Observacoes
+                      Observações
                       <textarea name="notes" placeholder="Detalhes adicionais da ordem">${escapeHtml(state.productionDraft.notes)}</textarea>
                     </label>
                   </div>
@@ -4609,8 +4925,8 @@ function renderProductionModule() {
               </div>
             </div>
           `
-            : `<div class="empty-state">Cadastre ao menos um produto no modulo Produtos para abrir novas ordens de producao.</div>`
-          : `<div class="empty-state">Seu perfil pode visualizar este modulo, mas nao pode editar.</div>`
+            : `<div class="empty-state">Cadastre ao menos um produto no módulo Produtos para abrir novas ordens de produção.</div>`
+          : `<div class="empty-state">Seu perfil pode visualizar este módulo, mas não pode editar.</div>`
       }
 
       <div class="table-actions production-filters-row">
@@ -4630,14 +4946,12 @@ function renderProductionModule() {
               { value: "all", label: "Todos" },
               { value: "planned", label: "Planejada" },
               { value: "in_progress", label: "Em andamento" },
-              { value: "completed", label: "Concluida" },
+              { value: "completed", label: "Concluída" },
               { value: "cancelled", label: "Cancelada" },
             ], state.productionStatusFilter)}
           </select>
         </label>
       </div>
-
-      ${renderProductionMachiningSection(machiningOrders)}
 
       <div class="table-card production-table-card">
         ${
@@ -4647,7 +4961,7 @@ function renderProductionModule() {
                 <thead>
                   <tr>
                     <th>Produto</th>
-                    <th>Codigo</th>
+                    <th>Código</th>
                     <th>Quantidade</th>
                     <th>Prioridade</th>
                     <th>Status</th>
@@ -4657,7 +4971,7 @@ function renderProductionModule() {
                   </tr>
                 </thead>
                 <tbody>
-                  ${filteredOrders.map((item) => renderProductionRow(item, canEdit)).join("")}
+                  ${filteredOrders.map((item) => renderProductionRow(item, canEdit, isPermissionsAdmin())).join("")}
                 </tbody>
               </table>
             `
@@ -4673,7 +4987,7 @@ function renderProductionModule() {
   `;
 }
 
-function renderProductionRow(item, canEdit) {
+function renderProductionRow(item, canEdit, canDelete = false) {
   const metadata = getProductionOrderMetadata(item);
 
   return `
@@ -4684,7 +4998,7 @@ function renderProductionRow(item, canEdit) {
       </td>
       <td>
         <strong>${escapeHtml(item.order_number || "-")}</strong>
-        <div class="table-inline-copy muted">${escapeHtml(item.product_code || "Sem codigo do produto")}</div>
+        <div class="table-inline-copy muted">${escapeHtml(item.product_code || "Sem código do produto")}</div>
       </td>
       <td>${formatQuantity(item.batch_size)}</td>
       <td>${productionPriorityCell(metadata.priority)}</td>
@@ -4694,25 +5008,22 @@ function renderProductionRow(item, canEdit) {
         <strong>${formatDate(item.planned_start)}</strong>
         <div class="table-inline-copy muted">Ate ${formatDate(item.planned_end)}</div>
       </td>
-      <td>${renderProductionActionCell(item, canEdit)}</td>
+      <td>${renderProductionActionCell(item, canEdit, canDelete)}</td>
     </tr>
   `;
 }
 
-function renderProductionActionCell(item, canEdit) {
-  if (!canEdit) {
-    return `<span class="muted">Somente leitura</span>`;
-  }
-
+function renderProductionActionCell(item, canEdit, canDelete = false) {
   return `
     <div class="action-button-group">
       ${
-        item.status === "planned"
+        canEdit && item.status === "planned"
           ? `<button class="primary-button" type="button" data-production-start-id="${item.id}">Iniciar</button>`
           : ""
       }
-      <button class="inline-button" type="button" data-production-edit-id="${item.id}">Editar</button>
-      <button class="inline-button danger-button" type="button" data-production-delete-id="${item.id}">Excluir</button>
+      <button class="inline-button" type="button" data-production-print-id="${item.id}">Imprimir</button>
+      ${canEdit ? `<button class="inline-button" type="button" data-production-edit-id="${item.id}">Editar</button>` : ""}
+      ${canDelete ? `<button class="inline-button danger-button" type="button" data-production-delete-id="${item.id}">Excluir</button>` : ""}
     </div>
   `;
 }
@@ -4723,8 +5034,8 @@ function renderProductionMachiningSection(machiningOrders) {
       <div class="module-head compact-head">
         <div>
           <p class="eyebrow muted">USINAGEM POR ETAPAS</p>
-          <h3>Ordens agrupadas por peca</h3>
-          <p class="muted">Fluxo sequencial com liberacao automatica da proxima etapa e entrada no estoque ao concluir.</p>
+          <h3>Ordens agrupadas por peça</h3>
+          <p class="muted">Fluxo sequencial com liberação automática da próxima etapa e entrada no estoque ao concluir.</p>
         </div>
       </div>
 
@@ -4732,7 +5043,7 @@ function renderProductionMachiningSection(machiningOrders) {
         ${
           machiningOrders.length
             ? machiningOrders.map((entry) => renderProductionMachiningCard(entry)).join("")
-            : `<div class="empty-state">Nenhuma ordem de usinagem enviada para producao.</div>`
+            : `<div class="empty-state">Nenhuma ordem de usinagem enviada para produção.</div>`
         }
       </div>
     </section>
@@ -4750,11 +5061,11 @@ function renderProductionMachiningCard(entry) {
         <div>
           <span class="machining-piece-code">${escapeHtml(entry.piece.code)}</span>
           <h4>${escapeHtml(entry.piece.name)}</h4>
-          <p class="muted">${entry.order.steps.length} etapa(s) • ${completedSteps} concluida(s)</p>
+          <p class="muted">${entry.order.steps.length} etapa(s) • ${completedSteps} concluída(s)</p>
         </div>
         <div class="production-machining-progress">
           <strong>${progress}%</strong>
-          <span>${completedSteps}/${entry.order.steps.length} concluidas</span>
+          <span>${completedSteps}/${entry.order.steps.length} concluídas</span>
           <div class="production-machining-progressbar">
             <span style="width: ${progress}%"></span>
           </div>
@@ -4777,14 +5088,14 @@ function renderProductionMachiningStep(piece, order, step, index) {
       <div class="production-machining-step-main">
         <div class="production-machining-step-index">Etapa ${index + 1}</div>
         <div class="production-machining-step-grid">
-          <div><span>Codigo da Ordem</span><strong>${escapeHtml(order.order_number)}</strong></div>
+          <div><span>Código da Ordem</span><strong>${escapeHtml(order.order_number)}</strong></div>
           <div><span>Status</span><strong>${escapeHtml(step.status === "Bloqueada" ? "Pendente" : step.status)}</strong></div>
           <div><span>Nome da Etapa</span><strong>${escapeHtml(step.name)}</strong></div>
           <div><span>Operador</span><strong>${escapeHtml(step.completed_by || step.operator || order.operator || "-")}</strong></div>
           <div><span>Data de Inicio</span><strong>${escapeHtml(step.started_at ? formatDateTime(step.started_at) : "-")}</strong></div>
-          <div><span>Peca</span><strong>${escapeHtml(piece.name)}</strong></div>
+          <div><span>Peça</span><strong>${escapeHtml(piece.name)}</strong></div>
           <div><span>Processo</span><strong>${escapeHtml(step.name)}</strong></div>
-          <div><span>Maquina</span><strong>${escapeHtml(step.machine || "-")}</strong></div>
+          <div><span>Máquina</span><strong>${escapeHtml(step.machine || "-")}</strong></div>
           <div><span>Tempo Estimado</span><strong>${formatProcessMinutes(step.estimated_minutes)}</strong></div>
         </div>
         <label class="production-machining-step-operator-field">
@@ -4831,7 +5142,7 @@ function renderOptions(options, selectedValue = "") {
 
 function renderCustomersModule() {
   if (!hasPermission("customers", "view")) {
-    return noPermissionTemplate("Seu perfil nao possui acesso ao modulo de clientes.");
+    return noPermissionTemplate("Seu perfil não possui acesso ao módulo de clientes.");
   }
 
   const canEdit = hasPermission("customers", "edit");
@@ -4878,7 +5189,7 @@ function renderCustomersModule() {
                 <div class="customer-form-header">
                   <div>
                     <h4>${state.customerDraft.edit_id ? "Editar Cliente" : "Novo Cliente"}</h4>
-                    <p class="muted">Cadastro comercial no mesmo padrao visual do ERP.</p>
+                    <p class="muted">Cadastro comercial no mesmo padrão visual do ERP.</p>
                   </div>
                 </div>
 
@@ -4917,7 +5228,7 @@ function renderCustomersModule() {
 
                   <div class="customer-form-row">
                     <label>
-                      Endereco
+                      Endereço
                       <input name="address" type="text" value="${escapeHtml(state.customerDraft.address)}" />
                     </label>
                     <label>
@@ -4932,8 +5243,8 @@ function renderCustomersModule() {
 
                   <div class="customer-form-row customer-form-row-full">
                     <label>
-                      Observacoes
-                      <textarea name="notes" placeholder="Anotacoes sobre o cliente">${escapeHtml(state.customerDraft.notes)}</textarea>
+                      Observações
+                      <textarea name="notes" placeholder="Anotações sobre o cliente">${escapeHtml(state.customerDraft.notes)}</textarea>
                     </label>
                   </div>
 
@@ -4945,7 +5256,7 @@ function renderCustomersModule() {
               </div>
             </div>
           `
-          : `<div class="empty-state">Seu perfil pode visualizar este modulo, mas nao pode editar.</div>`
+          : `<div class="empty-state">Seu perfil pode visualizar este módulo, mas não pode editar.</div>`
       }
 
       <div class="table-actions single-search-row">
@@ -4982,7 +5293,7 @@ function renderCustomersModule() {
 
 function renderSalesModule() {
   if (!hasPermission("sales", "view")) {
-    return noPermissionTemplate("Seu perfil nao possui acesso ao modulo de vendas.");
+    return noPermissionTemplate("Seu perfil não possui acesso ao módulo de vendas.");
   }
 
   const canEdit = hasPermission("sales", "edit");
@@ -5033,7 +5344,7 @@ function renderSalesModule() {
               <span class="production-toggle-icon">${isFormOpen && state.salesDraft.status === "finalized" ? "▴" : "▾"}</span>
             </button>
             <button class="ghost-button sales-create-button ${isFormOpen && state.salesDraft.status === "quote" ? "is-open" : ""}" type="button" data-sales-open-mode="quote">
-              <span>Novo Orcamento</span>
+              <span>Novo Orçamento</span>
               <span class="production-toggle-icon">${isFormOpen && state.salesDraft.status === "quote" ? "▴" : "▾"}</span>
             </button>
           ` : ""}
@@ -5047,8 +5358,8 @@ function renderSalesModule() {
               <div class="sales-accordion-card">
                 <div class="sales-form-header">
                   <div>
-                    <h4>${state.salesDraft.edit_id ? "Editar Venda" : state.salesDraft.status === "quote" ? "Novo Orcamento" : "Nova Venda"}</h4>
-                    <p class="muted">Fluxo comercial com integracao entre clientes, produtos e producao.</p>
+                    <h4>${state.salesDraft.edit_id ? "Editar Venda" : state.salesDraft.status === "quote" ? "Novo Orçamento" : "Nova Venda"}</h4>
+                    <p class="muted">Fluxo comercial com integração entre clientes, produtos e produção.</p>
                   </div>
                 </div>
 
@@ -5069,14 +5380,14 @@ function renderSalesModule() {
                       <input name="cnpj" type="text" readonly value="${escapeHtml(state.salesDraft.cnpj)}" />
                     </label>
                     <label>
-                      Endereco
+                      Endereço
                       <input name="address" type="text" readonly value="${escapeHtml(state.salesDraft.address)}" />
                     </label>
                   </div>
 
                   <div class="sales-form-row">
                     <label>
-                      No Nota Fiscal
+                      Nº da nota fiscal
                       <input name="invoice_number" type="text" placeholder="NF-0001" value="${escapeHtml(state.salesDraft.invoice_number)}" />
                     </label>
                     <label>
@@ -5094,11 +5405,11 @@ function renderSalesModule() {
                           { value: "", label: "Selecione" },
                           { value: "boleto", label: "Boleto" },
                           { value: "pix", label: "Pix" },
-                          { value: "transferencia", label: "Transferencia" },
-                          { value: "cartao", label: "Cartao" },
+                          { value: "transferencia", label: "Transferência" },
+                          { value: "cartao", label: "Cartão" },
                           { value: "dinheiro", label: "Dinheiro" },
                           { value: "cheque", label: "Cheque" },
-                          { value: "negociado_com_o_dono", label: "Negociado com o dono" },
+                          { value: "negociado_com_o_dono", label: "Negociado" },
                         ], state.salesDraft.payment_method)}
                       </select>
                     </label>
@@ -5109,7 +5420,7 @@ function renderSalesModule() {
                       Status da venda *
                       <select name="status" required>
                         ${renderOptions([
-                          { value: "quote", label: "Orcamento" },
+                          { value: "quote", label: "Orçamento" },
                           { value: "finalized", label: "Venda Finalizada" },
                         ], state.salesDraft.status)}
                       </select>
@@ -5148,21 +5459,21 @@ function renderSalesModule() {
 
                   <div class="sales-form-row sales-form-row-full">
                     <label>
-                      Observacoes
-                      <textarea name="contract_notes" placeholder="Observacoes da venda">${escapeHtml(state.salesDraft.contract_notes)}</textarea>
+                      Observações
+                      <textarea name="contract_notes" placeholder="Observações da venda">${escapeHtml(state.salesDraft.contract_notes)}</textarea>
                     </label>
                   </div>
 
                   <div class="form-actions-row sales-form-actions">
                     <button class="ghost-button" type="button" data-sales-cancel>Cancelar</button>
-                    <button class="secondary-button" type="button" data-sales-draft-preview="${state.salesDraft.status}">Gerar previa</button>
+                    <button class="secondary-button" type="button" data-sales-draft-preview="${state.salesDraft.status}">Gerar prévia</button>
                     <button class="primary-button" type="submit">Salvar</button>
                   </div>
                 </form>
               </div>
             </div>
           `
-          : `<div class="empty-state">Seu perfil pode visualizar este modulo, mas nao pode editar.</div>`
+          : `<div class="empty-state">Seu perfil pode visualizar este módulo, mas não pode editar.</div>`
       }
 
       ${
@@ -5190,7 +5501,7 @@ function renderSalesModule() {
                       <input name="cnpj" type="text" readonly value="${escapeHtml(state.salesContractDraft.cnpj)}" />
                     </label>
                     <label>
-                      Endereco
+                      Endereço
                       <input name="address" type="text" readonly value="${escapeHtml(state.salesContractDraft.address)}" />
                     </label>
                     <label>
@@ -5214,7 +5525,7 @@ function renderSalesModule() {
                     </label>
                     <label>
                       Status
-                      <input name="status_label" type="text" readonly value="${escapeHtml(state.salesContractDraft.status === "finalized" ? "Venda Finalizada" : "Orcamento")}" />
+                      <input name="status_label" type="text" readonly value="${escapeHtml(state.salesContractDraft.status === "finalized" ? "Venda Finalizada" : "Orçamento")}" />
                     </label>
                   </div>
 
@@ -5238,8 +5549,8 @@ function renderSalesModule() {
 
                   <div class="sales-form-row sales-form-row-full">
                     <label>
-                      Observacoes do contrato
-                      <textarea name="contract_notes" placeholder="Clausulas, observacoes e detalhes do contrato">${escapeHtml(state.salesContractDraft.contract_notes)}</textarea>
+                      Observações do contrato
+                      <textarea name="contract_notes" placeholder="Cláusulas, observações e detalhes do contrato">${escapeHtml(state.salesContractDraft.contract_notes)}</textarea>
                     </label>
                   </div>
 
@@ -5265,7 +5576,7 @@ function renderSalesModule() {
           <select id="sales-status-filter">
             ${renderOptions([
               { value: "all", label: "Todos" },
-              { value: "quote", label: "Orcamento" },
+              { value: "quote", label: "Orçamento" },
               { value: "finalized", label: "Venda Finalizada" },
             ], state.salesStatusFilter)}
           </select>
@@ -5285,7 +5596,7 @@ function renderSalesModule() {
                     <th>Pagamento</th>
                     <th>Status</th>
                     <th>Total</th>
-                    <th>Acoes</th>
+                    <th>Ações</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -5341,7 +5652,7 @@ function renderCustomerActionCell(item, canEdit) {
 function renderSaleRow(item, canEdit) {
   const metadata = getSaleMetadata(item);
   const itemSummary = metadata.items.length
-    ? metadata.items.map((saleItem) => `${saleItem.product_name || "-"} x ${formatQuantity(saleItem.quantity || 0)}`).join(" • ")
+    ? metadata.items.map((saleItem) => `${saleItem.product_name || "-"} x ${formatWholeQuantity(saleItem.quantity || 0)}`).join(" • ")
     : "Sem itens";
   return `
     <tr>
@@ -5361,6 +5672,10 @@ function renderSaleRow(item, canEdit) {
 }
 
 function renderSaleActionCell(item, metadata, canEdit) {
+  const canSendToProduction = metadata.status === "finalized"
+    && !metadata.productionGenerated
+    && !(metadata.productionOrderIds || []).length;
+
   if (!canEdit) {
     return `
       <div class="action-button-group">
@@ -5372,7 +5687,7 @@ function renderSaleActionCell(item, metadata, canEdit) {
   return `
     <div class="action-button-group">
       <button class="inline-button" type="button" data-sales-generate-document="${metadata.status === "quote" ? "quote" : "sale"}" data-sales-document-id="${item.id}">
-        ${metadata.status === "quote" ? "Orcamento" : "Venda PDF"}
+        ${metadata.status === "quote" ? "Orçamento" : "Venda PDF"}
       </button>
       ${
         metadata.status === "quote"
@@ -5387,6 +5702,11 @@ function renderSaleActionCell(item, metadata, canEdit) {
           ? `<button class="inline-button movement-button" type="button" data-sales-finalize-id="${item.id}">Finalizar venda</button>`
           : ""
       }
+      ${
+        canSendToProduction
+          ? `<button class="inline-button movement-button" type="button" data-sales-send-production-id="${item.id}">Enviar para produção</button>`
+          : ""
+      }
       <button class="inline-button danger-button" type="button" data-sales-delete-id="${item.id}">Excluir</button>
     </div>
   `;
@@ -5395,10 +5715,13 @@ function renderSaleActionCell(item, metadata, canEdit) {
 function renderSalesConfigModal(canManageConfig) {
   const activeTab = state.salesConfigTab || "quote";
   const settings = state.salesDocumentSettings;
-  const template = getSalesTemplate(activeTab === "company" ? "quote" : activeTab);
-  const preview = resolveSalesTemplateContent(activeTab === "company" ? "quote" : activeTab, null);
+  const previewType = activeTab === "company" ? "quote" : activeTab;
+  const template = getSalesTemplate(previewType);
+  const preview = resolveSalesTemplateContent(previewType, null);
+  const hasTemplatePdf = Boolean(template.pdf_template_data_url);
+  const templatePdfSize = getSalesTemplatePdfSize(template.pdf_template_data_url);
   const tabs = [
-    { key: "quote", label: "Orcamento" },
+    { key: "quote", label: "Orçamento" },
     { key: "sale", label: "Venda" },
     { key: "contract", label: "Contrato" },
     { key: "company", label: "Dados da Empresa" },
@@ -5406,15 +5729,15 @@ function renderSalesConfigModal(canManageConfig) {
 
   return `
     <div class="modal-overlay sales-config-overlay" data-sales-config-close>
-      <div class="modal-card sales-config-modal" role="dialog" aria-modal="true" aria-label="Configuracao de modelos comerciais" data-sales-config-card>
+      <div class="modal-card sales-config-modal" role="dialog" aria-modal="true" aria-label="Configuração de modelos comerciais" data-sales-config-card>
         <div class="sales-config-header">
           <div>
             <p class="eyebrow muted">Modelos Comerciais</p>
             <h3>Config</h3>
-            <p class="muted">Configure os modelos de orcamento, venda, contrato e os dados fixos da empresa.</p>
+            <p class="muted">Configure os modelos de orçamento, venda, contrato e os dados fixos da empresa.</p>
           </div>
           <div class="sales-config-header-actions">
-            ${canManageConfig ? `<span class="status-chip chip-green">Edicao liberada</span>` : `<span class="status-chip chip-blue">Somente leitura</span>`}
+            ${canManageConfig ? `<span class="status-chip chip-green">Edição liberada</span>` : `<span class="status-chip chip-blue">Somente leitura</span>`}
             <button class="ghost-button" type="button" data-sales-config-close-button>Fechar</button>
           </div>
         </div>
@@ -5439,17 +5762,45 @@ function renderSalesConfigModal(canManageConfig) {
           <aside class="sales-config-preview-panel">
             <div class="sales-config-preview-head">
               <div>
-                <span class="eyebrow muted">Pre-visualizacao</span>
-                <h4>${activeTab === "company" ? "Orcamento Padrao" : template.title}</h4>
+                <span class="eyebrow muted">Pré-visualização</span>
+                <h4>${activeTab === "company" ? "Orçamento Padrão" : template.title}</h4>
               </div>
               <div class="sales-config-preview-actions">
-                <button class="ghost-button" type="button" data-sales-template-preview="${activeTab === "company" ? "quote" : activeTab}">Visualizar modelo</button>
-                <button class="secondary-button" type="button" data-sales-template-generate="${activeTab === "company" ? "quote" : activeTab}">Gerar previa</button>
+                ${
+                  hasTemplatePdf
+                    ? `<button class="ghost-button" type="button" data-sales-template-open-pdf="${previewType}">Abrir PDF base</button>`
+                    : ""
+                }
+                <button class="ghost-button" type="button" data-sales-template-preview="${previewType}">Visualizar modelo</button>
+                <button class="secondary-button" type="button" data-sales-template-generate="${previewType}">Gerar prévia</button>
               </div>
             </div>
             <div class="sales-config-placeholders">
-              ${getSalesTemplatePlaceholderList(activeTab === "company" ? "quote" : activeTab).map((item) => `<code>${item}</code>`).join("")}
+              ${getSalesTemplatePlaceholderList(previewType).map((item) => `<code>${item}</code>`).join("")}
             </div>
+            ${
+              hasTemplatePdf
+                ? `
+                  <section class="sales-config-pdf-preview-card">
+                    <div class="sales-config-pdf-preview-head">
+                      <div>
+                        <strong>PDF base carregado</strong>
+                        <p class="muted">${escapeHtml(template.pdf_template_name || "modelo.pdf")} • ${formatFileSize(templatePdfSize)}</p>
+                      </div>
+                      <span class="status-chip chip-blue">Referência visual</span>
+                    </div>
+                    <iframe
+                      class="sales-config-pdf-frame"
+                      title="PDF base do modelo ${escapeHtml(template.title || previewType)}"
+                      src="${template.pdf_template_data_url}"
+                    ></iframe>
+                    <p class="muted">
+                      O PDF serve como base visual do documento. As variáveis e ajustes continuam no editor do modelo abaixo.
+                    </p>
+                  </section>
+                `
+                : ""
+            }
             <div class="sales-document-preview-frame">${preview.html}</div>
           </aside>
         </div>
@@ -5461,6 +5812,7 @@ function renderSalesConfigModal(canManageConfig) {
 function renderSalesTemplateSettingsForm(type, template, canManageConfig) {
   const disabled = canManageConfig ? "" : "disabled";
   const isContract = type === "contract";
+  const pdfSize = getSalesTemplatePdfSize(template.pdf_template_data_url);
 
   return `
     <form id="sales-config-template-form" class="sales-config-form" data-sales-config-form="${type}">
@@ -5471,17 +5823,17 @@ function renderSalesTemplateSettingsForm(type, template, canManageConfig) {
           <input name="name" type="text" value="${escapeHtml(template.name)}" ${disabled} />
         </label>
         <label>
-          Titulo do documento
+          Título do documento
           <input name="title" type="text" value="${escapeHtml(template.title)}" ${disabled} />
         </label>
         <label>
-          Validade do orcamento
+          Validade do orçamento
           <input name="validity_days" type="number" min="0" step="1" value="${escapeHtml(template.validity_days)}" ${disabled} />
         </label>
       </div>
 
       <label>
-        Cabecalho
+        Cabeçalho
         <textarea name="header" ${disabled}>${escapeHtml(template.header)}</textarea>
       </label>
       ${
@@ -5494,14 +5846,14 @@ function renderSalesTemplateSettingsForm(type, template, canManageConfig) {
           `
           : `
             <label>
-              Texto de apresentacao
+              Texto de apresentação
               <textarea name="presentation_text" ${disabled}>${escapeHtml(template.presentation_text)}</textarea>
             </label>
           `
       }
       <div class="sales-config-grid">
         <label>
-          Condicoes de pagamento
+          Condições de pagamento
           <textarea name="payment_terms" ${disabled}>${escapeHtml(template.payment_terms)}</textarea>
         </label>
         <label>
@@ -5520,7 +5872,7 @@ function renderSalesTemplateSettingsForm(type, template, canManageConfig) {
         </label>
       </div>
       <label>
-        Observacoes
+        Observações
         <textarea name="notes" ${disabled}>${escapeHtml(template.notes)}</textarea>
       </label>
       <label>
@@ -5532,9 +5884,56 @@ function renderSalesTemplateSettingsForm(type, template, canManageConfig) {
         <textarea name="final_message" ${disabled}>${escapeHtml(template.final_message)}</textarea>
       </label>
       <label>
-        Rodape
+        Rodapé
         <textarea name="footer" ${disabled}>${escapeHtml(template.footer)}</textarea>
       </label>
+      <div class="sales-config-pdf-card">
+        <div class="sales-config-pdf-copy">
+          <strong>PDF base do modelo</strong>
+          <p class="muted">
+            Envie o PDF padrão usado pela sua equipe para orçamento, venda ou contrato. Limite de ${formatFileSize(SALES_TEMPLATE_PDF_MAX_SIZE)}.
+          </p>
+        </div>
+        <div class="sales-config-grid">
+          <label>
+            Arquivo PDF
+            <input name="pdf_template_file" type="file" accept="application/pdf,.pdf" ${disabled} />
+          </label>
+          <label>
+            Última atualização
+            <input
+              name="pdf_template_updated_at"
+              type="text"
+              value="${escapeHtml(template.pdf_template_updated_at ? formatDateTime(template.pdf_template_updated_at) : "Nenhum PDF carregado")}"
+              readonly
+            />
+          </label>
+        </div>
+        ${
+          template.pdf_template_data_url
+            ? `
+              <div class="sales-config-file-pill">
+                <div>
+                  <strong>${escapeHtml(template.pdf_template_name || "modelo.pdf")}</strong>
+                  <div class="table-inline-copy muted">${formatFileSize(pdfSize)} • PDF pronto para consulta</div>
+                </div>
+                <div class="sales-config-file-actions">
+                  <button class="ghost-button" type="button" data-sales-template-open-pdf="${type}">Abrir PDF</button>
+                  ${
+                    canManageConfig
+                      ? `<button class="ghost-button danger-button" type="button" data-sales-template-remove-pdf="${type}">Remover PDF</button>`
+                      : ""
+                  }
+                </div>
+              </div>
+            `
+            : `
+              <p class="muted">
+                Nenhum PDF carregado ainda. O sistema continuará usando somente o modelo editável com placeholders.
+              </p>
+            `
+        }
+      </div>
       <label>
         ${isContract ? "Texto completo do contrato" : "Editor do modelo (HTML com placeholders)"}
         <textarea name="body_html" class="sales-config-html-editor ${isContract ? "sales-config-contract-editor" : ""}" ${disabled}>${escapeHtml(template.body_html)}</textarea>
@@ -5544,7 +5943,7 @@ function renderSalesTemplateSettingsForm(type, template, canManageConfig) {
           ? `
             <p class="muted">
               Escreva aqui o contrato completo. Use os placeholders para preencher automaticamente dados do cliente,
-              empresa, valores, itens e condicoes negociadas. O cabecalho e o rodape permanecem em campos separados.
+              empresa, valores, itens e condições negociadas. O cabeçalho e o rodapé permanecem em campos separados.
             </p>
           `
           : ""
@@ -5554,9 +5953,9 @@ function renderSalesTemplateSettingsForm(type, template, canManageConfig) {
         ${
           canManageConfig
             ? `
-              <button class="ghost-button" type="button" data-sales-template-restore="${type}">Restaurar padrao</button>
+              <button class="ghost-button" type="button" data-sales-template-restore="${type}">Restaurar padrão</button>
               <button class="secondary-button" type="button" data-sales-template-save="${type}">Salvar modelo</button>
-              <button class="primary-button" type="button" data-sales-template-default="${type}">Definir como padrao</button>
+              <button class="primary-button" type="button" data-sales-template-default="${type}">Definir como padrão</button>
             `
             : ""
         }
@@ -5596,29 +5995,29 @@ function renderSalesCompanySettingsForm(company, numbering, canManageConfig) {
           <input name="site" type="text" value="${escapeHtml(company.site)}" ${disabled} />
         </label>
         <label>
-          Endereco
+          Endereço
           <input name="address" type="text" value="${escapeHtml(company.address)}" ${disabled} />
         </label>
       </div>
       <div class="sales-config-grid">
         <label>
-          Responsavel
+          Responsável
           <input name="responsible_name" type="text" value="${escapeHtml(company.responsible_name)}" ${disabled} />
         </label>
         <label>
-          Cargo do responsavel
+          Cargo do responsável
           <input name="responsible_role" type="text" value="${escapeHtml(company.responsible_role)}" ${disabled} />
         </label>
       </div>
       <label>
-        Assinatura do responsavel
+        Assinatura do responsável
         <textarea name="signature" ${disabled}>${escapeHtml(company.signature)}</textarea>
       </label>
       <div class="sales-config-numbering-card">
-        <h4>Numeracao automatica</h4>
-        <p class="muted">A numeracao agora eh gerada automaticamente no backend, por tipo e por ano, sem edicao manual.</p>
+        <h4>Numeração automática</h4>
+        <p class="muted">A numeração agora é gerada automaticamente no backend, por tipo e por ano, sem edição manual.</p>
         <div class="sales-config-numbering-grid">
-          <div><strong>Orcamento</strong><span>ORC-01${yearSuffix}</span></div>
+          <div><strong>Orçamento</strong><span>ORC-01${yearSuffix}</span></div>
           <div><strong>Venda</strong><span>VEN-01${yearSuffix}</span></div>
           <div><strong>Contrato</strong><span>CONT-01${yearSuffix}</span></div>
         </div>
@@ -5653,20 +6052,40 @@ function renderSalesCompanySettingsForm(company, numbering, canManageConfig) {
 function renderSalesDocumentPreviewModal() {
   return `
     <div class="modal-overlay sales-document-modal-overlay" data-sales-preview-close>
-      <div class="modal-card sales-document-modal" role="dialog" aria-modal="true" aria-label="Visualizacao do documento comercial" data-sales-preview-card>
+      <div class="modal-card sales-document-modal" role="dialog" aria-modal="true" aria-label="Visualização do documento comercial" data-sales-preview-card>
         <div class="sales-config-header">
           <div>
             <p class="eyebrow muted">Documento Comercial</p>
             <h3>${escapeHtml(state.salesDocumentPreview.title || "Previa")}</h3>
-            <p class="muted">Documento pronto para impressao, exportacao em PDF e envio ao cliente.</p>
+            <p class="muted">Documento pronto para impressão, exportação em PDF e envio ao cliente.</p>
           </div>
           <div class="sales-config-header-actions">
+            ${
+              state.salesDocumentPreview.templatePdfDataUrl
+                ? `<button class="ghost-button" type="button" data-sales-preview-open-template-pdf>PDF base</button>`
+                : ""
+            }
             <button class="secondary-button" type="button" data-sales-preview-export>Baixar PDF</button>
             <button class="ghost-button" type="button" data-sales-preview-print>Imprimir</button>
             <button class="primary-button" type="button" data-sales-preview-send>Enviar ao cliente</button>
             <button class="ghost-button" type="button" data-sales-preview-close-button>Fechar</button>
           </div>
         </div>
+        ${
+          state.salesDocumentPreview.templatePdfDataUrl
+            ? `
+              <div class="sales-config-pdf-preview-card sales-config-pdf-preview-inline">
+                <div class="sales-config-pdf-preview-head">
+                  <div>
+                    <strong>PDF base vinculado</strong>
+                    <p class="muted">${escapeHtml(state.salesDocumentPreview.templatePdfName || "modelo.pdf")}</p>
+                  </div>
+                  <span class="status-chip chip-blue">Modelo original</span>
+                </div>
+              </div>
+            `
+            : ""
+        }
         <div class="sales-document-preview-frame sales-document-preview-modal-frame">${state.salesDocumentPreview.html}</div>
       </div>
     </div>
@@ -5674,10 +6093,12 @@ function renderSalesDocumentPreviewModal() {
 }
 
 function renderSalesItemRow(item, index) {
-  const productOptions = (state.moduleData.products || []).map((product) => ({
-    value: product.id,
-    label: `${product.name} (${product.code})`,
-  }));
+  const productOptions = (state.moduleData.products || [])
+    .filter((product) => isProductVisibleInCommercialDocuments(product) || product.id === item.product_id)
+    .map((product) => ({
+      value: product.id,
+      label: `${product.name} (${product.code})`,
+    }));
   const subtotal = Number(item.quantity || 0) * Number(item.unit_price || 0) - Number(item.discount || 0);
 
   return `
@@ -5690,15 +6111,15 @@ function renderSalesItemRow(item, index) {
         </select>
       </label>
       <label>
-        Codigo
+        Código
         <input data-sales-item-field="product_code" data-sales-item-index="${index}" type="text" readonly value="${escapeHtml(item.product_code)}" />
       </label>
       <label>
         Quantidade
-        <input data-sales-item-field="quantity" data-sales-item-index="${index}" type="number" min="0.01" step="0.01" value="${escapeHtml(item.quantity)}" />
+        <input data-sales-item-field="quantity" data-sales-item-index="${index}" type="number" min="1" step="1" value="${escapeHtml(item.quantity)}" />
       </label>
       <label>
-        Valor unitario
+        Valor unitário
         <input
           data-sales-item-field="unit_price"
           data-sales-item-index="${index}"
@@ -5745,12 +6166,12 @@ function renderPurchaseItemRow(item, index) {
         <input data-purchase-item-field="product_name" data-purchase-item-index="${index}" type="text" value="${escapeHtml(item.product_name)}" />
       </label>
       <label>
-        Descricao
+        Descrição
         <input data-purchase-item-field="description" data-purchase-item-index="${index}" type="text" value="${escapeHtml(item.description)}" />
       </label>
       <label>
         Quantidade
-        <input data-purchase-item-field="quantity" data-purchase-item-index="${index}" type="number" min="0.01" step="0.01" value="${escapeHtml(item.quantity)}" />
+        <input data-purchase-item-field="quantity" data-purchase-item-index="${index}" type="number" min="1" step="1" inputmode="numeric" value="${escapeHtml(item.quantity)}" />
       </label>
       <label>
         Unidade
@@ -5819,7 +6240,7 @@ function renderPurchaseRow(item, canEdit) {
 
 function renderPurchasesModule() {
   if (!hasPermission("purchases", "view")) {
-    return noPermissionTemplate("Seu perfil nao possui acesso ao modulo de compras.");
+    return noPermissionTemplate("Seu perfil não possui acesso ao módulo de compras.");
   }
 
   const canEdit = hasPermission("purchases", "edit");
@@ -5850,14 +6271,14 @@ function renderPurchasesModule() {
   const inPurchaseCount = requests.filter(({ metadata }) => metadata.status === "in_purchase").length;
   const completedCount = requests.filter(({ metadata }) => metadata.status === "completed").length;
   const notificationCount = requests.reduce((total, { metadata }) => total + (metadata.notifications || []).length, 0);
-  const requestSummaryLabel = `${requests.length} ${requests.length === 1 ? "solicitacao" : "solicitacoes"}`;
+  const requestSummaryLabel = `${requests.length} ${requests.length === 1 ? "solicitação" : "solicitações"}`;
 
   return `
     <section class="module-panel purchases-module">
       <div class="module-head purchases-head">
         <div>
           <p class="eyebrow muted">Compras</p>
-          <h3>Solicitacao de Compras</h3>
+          <h3>Solicitação de Compras</h3>
           <p class="muted">${requestSummaryLabel}</p>
         </div>
         <div class="module-head-actions">
@@ -5870,7 +6291,7 @@ function renderPurchasesModule() {
 
       <div class="summary-grid purchases-summary-grid">
         ${renderKpiCard({
-          label: "Solicitacoes",
+          label: "Solicitações",
           value: requests.length,
           note: `${pendingCount} pendente(s) para analise`,
           icon: "◧",
@@ -5884,9 +6305,9 @@ function renderPurchasesModule() {
           tone: "amber",
         })}
         ${renderKpiCard({
-          label: "Concluidas",
+          label: "Concluídas",
           value: completedCount,
-          note: completedCount ? "Compras finalizadas" : "Nenhuma compra concluida",
+          note: completedCount ? "Compras finalizadas" : "Nenhuma compra concluída",
           icon: "◪",
           tone: "green",
         })}
@@ -5899,8 +6320,8 @@ function renderPurchasesModule() {
               <div class="purchase-accordion-card">
                 <div class="purchase-form-header">
                   <div>
-                    <h4>${state.purchaseDraft.edit_id ? "Editar Solicitacao" : "Nova Solicitacao"}</h4>
-                    <p class="muted">Accordion controlado, responsivo e preparado para integracao com backend.</p>
+                    <h4>${state.purchaseDraft.edit_id ? "Editar Solicitação" : "Nova Solicitação"}</h4>
+                    <p class="muted">Accordion controlado, responsivo e preparado para integração com backend.</p>
                   </div>
                 </div>
 
@@ -5933,7 +6354,7 @@ function renderPurchasesModule() {
                           { value: "", label: "Selecione" },
                           { value: "Usinagem", label: "Usinagem" },
                           { value: "Montagem", label: "Montagem" },
-                          { value: "Fabricacao", label: "Fabricacao" },
+                          { value: "Fabricação", label: "Fabricação" },
                           { value: "Compras", label: "Compras" },
                           { value: "Administrativo", label: "Administrativo" },
                           { value: "Financeiro", label: "Financeiro" },
@@ -5956,7 +6377,7 @@ function renderPurchasesModule() {
                   <div class="purchase-items-panel">
                     <div class="purchase-items-header">
                       <div>
-                        <h5>Itens da solicitacao</h5>
+                        <h5>Itens da solicitação</h5>
                         <p class="muted">Adicione varios itens e acompanhe o subtotal de cada linha.</p>
                       </div>
                       <button class="ghost-button" type="button" data-purchase-add-item>+ Adicionar</button>
@@ -5983,7 +6404,7 @@ function renderPurchasesModule() {
               </div>
             </div>
           `
-          : `<div class="empty-state">Seu perfil pode visualizar este modulo, mas nao pode editar.</div>`
+          : `<div class="empty-state">Seu perfil pode visualizar este módulo, mas não pode editar.</div>`
       }
 
       ${
@@ -5994,7 +6415,7 @@ function renderPurchasesModule() {
                 <div class="purchase-form-header">
                   <div>
                     <h4>Concluir Compra</h4>
-                    <p class="muted">Registre pedido, nota fiscal, pagamento, anexos e a notificacao ao solicitante.</p>
+                    <p class="muted">Registre pedido, nota fiscal, pagamento, anexos e a notificação ao solicitante.</p>
                   </div>
                 </div>
 
@@ -6003,11 +6424,11 @@ function renderPurchasesModule() {
 
                   <div class="purchase-form-row">
                     <label>
-                      Numero do pedido
+                      Número do pedido
                       <input name="order_number" type="text" placeholder="PED-20260407-001" value="${escapeHtml(state.purchaseConclusionDraft.order_number)}" />
                     </label>
                     <label>
-                      Numero da nota fiscal
+                      Número da nota fiscal
                       <input name="invoice_number" type="text" placeholder="NF-000123" value="${escapeHtml(state.purchaseConclusionDraft.invoice_number)}" />
                     </label>
                     <label>
@@ -6028,7 +6449,7 @@ function renderPurchasesModule() {
                           { value: "", label: "Selecione" },
                           { value: "Dinheiro", label: "Dinheiro" },
                           { value: "Pix", label: "Pix" },
-                          { value: "Cartao", label: "Cartao" },
+                          { value: "Cartão", label: "Cartão" },
                           { value: "Boleto", label: "Boleto" },
                           { value: "Notinha", label: "Notinha" },
                         ], state.purchaseConclusionDraft.payment_method)}
@@ -6049,7 +6470,7 @@ function renderPurchasesModule() {
 
                   <div class="purchase-form-row purchase-form-row-full">
                     <label>
-                      Observacoes da compra
+                      Observações da compra
                       <textarea name="purchase_notes" placeholder="Detalhes da compra">${escapeHtml(state.purchaseConclusionDraft.purchase_notes)}</textarea>
                     </label>
                   </div>
@@ -6079,18 +6500,18 @@ function renderPurchasesModule() {
       <div class="purchase-toolbar">
         <div class="purchase-toolbar-head">
           <div>
-            <p class="eyebrow muted">Solicitacoes</p>
-            <h4>${requests.length} solicitacoes</h4>
+            <p class="eyebrow muted">Solicitações</p>
+            <h4>${requests.length} solicitações</h4>
           </div>
           <div class="purchase-toolbar-actions">
-            <button class="topbar-icon-button purchase-alert-button" type="button" data-purchase-inline-alert aria-label="Notificacoes">
+            <button class="topbar-icon-button purchase-alert-button" type="button" data-purchase-inline-alert aria-label="Notificações">
               <span>◔</span>
             </button>
             ${
               canEdit
                 ? `
                   <button class="primary-button purchase-create-button ${isRequestFormOpen ? "is-open" : ""}" type="button" data-purchase-toggle-form>
-                    <span>+ Nova Solicitacao</span>
+                    <span>+ Nova Solicitação</span>
                     <span class="production-toggle-icon">${isRequestFormOpen ? "▴" : "▾"}</span>
                   </button>
                 `
@@ -6114,7 +6535,7 @@ function renderPurchasesModule() {
                 { value: "approved", label: "Aprovada" },
                 { value: "in_purchase", label: "Em compra" },
                 { value: "purchase_completed", label: "Compra efetuada" },
-                { value: "completed", label: "Concluida" },
+                { value: "completed", label: "Concluída" },
                 { value: "cancelled", label: "Cancelada" },
               ], state.purchaseStatusFilter)}
             </select>
@@ -6145,7 +6566,7 @@ function renderPurchasesModule() {
             : `
               <div class="production-empty-state purchase-empty-state">
                 <div class="production-empty-icon">◧</div>
-                <strong>Nenhuma solicitacao encontrada</strong>
+                <strong>Nenhuma solicitação encontrada</strong>
               </div>
             `
         }
@@ -6156,7 +6577,7 @@ function renderPurchasesModule() {
 
 function renderCrudForm(formId, fields, canEdit) {
   if (!canEdit) {
-    return `<div class="empty-state">Seu perfil pode visualizar este modulo, mas nao pode editar.</div>`;
+    return `<div class="empty-state">Seu perfil pode visualizar este módulo, mas não pode editar.</div>`;
   }
 
   return `
@@ -6200,7 +6621,7 @@ function inputField(name, label, type = "text", placeholder = "") {
   return `
     <label>
       ${label}
-      <input name="${name}" type="${type}" placeholder="${placeholder}" required />
+      <input name="${name}" type="${type}" placeholder="${placeholder}" ${getWholeNumberInputAttributes(name, type)} required />
     </label>
   `;
 }
@@ -6209,7 +6630,7 @@ function optionalInputField(name, label, type = "text", placeholder = "") {
   return `
     <label>
       ${label}
-      <input name="${name}" type="${type}" placeholder="${placeholder}" />
+      <input name="${name}" type="${type}" placeholder="${placeholder}" ${getWholeNumberInputAttributes(name, type)} />
     </label>
   `;
 }
@@ -6254,7 +6675,7 @@ function draftInputField(name, label, value = "", type = "text", placeholder = "
   return `
     <label>
       ${label}${required ? " *" : ""}
-      <input data-bom-structure-field="${name}" name="${name}" type="${type}" placeholder="${placeholder}" value="${escapeHtml(value)}" ${readonly ? "readonly" : ""} ${required ? "required" : ""} />
+      <input data-bom-structure-field="${name}" name="${name}" type="${type}" placeholder="${placeholder}" value="${escapeHtml(value)}" ${getWholeNumberInputAttributes(name, type)} ${readonly ? "readonly" : ""} ${required ? "required" : ""} />
     </label>
   `;
 }
@@ -6372,6 +6793,7 @@ function productActionCell(item, canEdit) {
     <div class="action-button-group">
       <button class="inline-button movement-button" type="button" data-product-move-id="${item.id}">Movimentar</button>
       <button class="inline-button" type="button" data-product-edit-id="${item.id}">Editar</button>
+      <button class="inline-button" type="button" data-product-duplicate-id="${item.id}">Duplicar</button>
       <button class="inline-button danger-button" type="button" data-product-delete-id="${item.id}">Excluir</button>
     </div>
   `;
@@ -6379,13 +6801,243 @@ function productActionCell(item, canEdit) {
 
 function renderLastMovementUserCell(item) {
   if (!item.last_moved_by_name) {
-    return `<span class="muted">Sem movimentacao</span>`;
+    return `<span class="muted">Sem movimentação</span>`;
   }
 
   return `
     <strong>${escapeHtml(item.last_moved_by_name)}</strong>
-    <div class="table-inline-copy muted">${item.last_movement_at ? formatDateTime(item.last_movement_at) : "Data nao informada"}</div>
+    <div class="table-inline-copy muted">${item.last_movement_at ? formatDateTime(item.last_movement_at) : "Data não informada"}</div>
   `;
+}
+
+function parseProductSaleOptionsText(value) {
+  return String(value || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [rawCode, rawLabel, rawPrice, rawProductionQuantity] = line.split(PRODUCT_SALE_OPTION_SEPARATOR).map((part) => String(part || "").trim());
+      const code = rawCode || "";
+      const label = rawLabel || "";
+      const price = parseCurrencyInput(rawPrice || 0);
+      const productionQuantity = Number(rawProductionQuantity || 1);
+      return {
+        id: code || label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || `opcao-${Date.now()}`,
+        code,
+        label,
+        price,
+        production_quantity: productionQuantity,
+        kit_structure_id: "",
+        current_stock: 0,
+        minimum_stock: 0,
+      };
+    })
+    .filter((option) => option.label && Number.isFinite(option.price) && option.price >= 0);
+}
+
+function normalizeProductSaleOptions(product) {
+  if (Array.isArray(product?.sale_options)) {
+    return product.sale_options
+      .map((option) => ({
+        id: String(option.id || option.code || option.label || "").trim(),
+        code: String(option.code || option.id || "").trim(),
+        label: String(option.label || "").trim(),
+        price: typeof option.price === "number" ? Number(option.price || 0) : parseCurrencyInput(option.price || 0),
+        production_quantity: normalizeWholeNumber(option.production_quantity || 1, { min: 0, fallback: 1 }),
+        kit_structure_id: String(option.kit_structure_id || option.bom_structure_id || "").trim(),
+        current_stock: Number(option.current_stock || 0),
+        minimum_stock: Number(option.minimum_stock || 0),
+      }))
+      .filter((option) => option.label);
+  }
+
+  if (typeof product?.sale_options === "string" && product.sale_options.trim()) {
+    try {
+      return normalizeProductSaleOptions({ sale_options: JSON.parse(product.sale_options) });
+    } catch {
+      return parseProductSaleOptionsText(product.sale_options);
+    }
+  }
+
+  return [];
+}
+
+function formatProductSaleOptionsText(options) {
+  return normalizeProductSaleOptions({ sale_options: options })
+    .map((option) => [
+      option.code || option.id || "",
+      option.label,
+      formatCurrency(option.price).replace(/^R\$\s?/, ""),
+      option.production_quantity || "",
+      option.kit_structure_id || "",
+      option.current_stock || "",
+      option.minimum_stock || "",
+    ].filter((value, index) => index < 3 || value).join(PRODUCT_SALE_OPTION_SEPARATOR))
+    .join("\n");
+}
+
+function renderProductSaleVariationRows(options = [], product = null) {
+  const sourceRows = Array.isArray(options) && options.length
+    ? options
+    : [{ id: "", code: "", label: "", price: "", production_quantity: 1, kit_structure_id: "", current_stock: 0, minimum_stock: 0 }];
+  const visibleRows = sourceRows.map((option) => ({
+    id: String(option.id || option.code || option.label || "").trim(),
+    code: String(option.code || option.id || "").trim(),
+    label: String(option.label || "").trim(),
+    price: option.price ?? "",
+    production_quantity: option.production_quantity ?? 1,
+    kit_structure_id: option.kit_structure_id || option.bom_structure_id || "",
+    current_stock: option.current_stock ?? 0,
+    minimum_stock: option.minimum_stock ?? 0,
+  }));
+  const kitOptions = (state.moduleData.bomStructures || [])
+    .filter((structure) => structure.status === "active")
+    .map((structure) => ({
+      value: structure.id,
+      label: `${structure.name || structure.product_name || "Kit"} (${structure.code || structure.version || "sem código"})`,
+    }));
+
+  return visibleRows.map((option, index) => `
+    <div class="product-variation-row" data-product-variation-row="${index}">
+      <label>
+        Código da variação
+        <input name="sale_option_code" type="text" value="${escapeHtml(option.code || option.id || "")}" placeholder="MVC00-10" />
+      </label>
+      <label>
+        Variação / kit
+        <input name="sale_option_label" type="text" value="${escapeHtml(option.label || "")}" placeholder="Ex.: 1 un, Kit 12 peças, 10L" />
+      </label>
+      <label>
+        Preco
+        <input name="sale_option_price" type="text" inputmode="decimal" data-currency-input="true" data-currency-allow-empty="true" value="${escapeHtml(option.price || "")}" />
+      </label>
+      <label>
+        Qtd. para produzir
+        <input name="sale_option_production_quantity" type="number" min="0" step="1" inputmode="numeric" value="${escapeHtml(option.production_quantity || 1)}" placeholder="1" />
+      </label>
+      <label>
+        Estoque atual
+        <input name="sale_option_current_stock" type="number" min="0" step="1" inputmode="numeric" value="${escapeHtml(option.current_stock || 0)}" />
+      </label>
+      <label>
+        Estoque mínimo
+        <input name="sale_option_minimum_stock" type="number" min="0" step="1" inputmode="numeric" value="${escapeHtml(option.minimum_stock || 0)}" />
+      </label>
+      <label>
+        Kit vinculado
+        <input name="sale_option_kit_structure_id" type="hidden" value="${escapeHtml(option.kit_structure_id || "")}" />
+        <span class="customer-cnpj-field">
+          <input
+            type="text"
+            readonly
+            value="${escapeHtml(kitOptions.find((kit) => kit.value === option.kit_structure_id)?.label || "")}"
+            placeholder="Usar BOM ativo do produto"
+            data-product-open-kit-picker="${index}"
+          />
+        </span>
+      </label>
+      <button class="inline-button danger-button" type="button" data-product-remove-variation="${index}">Remover</button>
+    </div>
+  `).join("");
+}
+
+function normalizeProductionSections(input) {
+  const rows = Array.isArray(input) ? input : [];
+  return rows
+    .map((section, index) => {
+      const label = String(section?.label || section?.name || "").trim();
+      const id = String(section?.id || label.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || `secao-${index + 1}`).trim();
+      return { id, label };
+    })
+    .filter((section) => section.id && section.label);
+}
+
+function getProductProductionSections(product) {
+  if (!product?.has_production_sections) return [];
+  if (Array.isArray(product.production_sections)) {
+    return normalizeProductionSections(product.production_sections);
+  }
+  if (typeof product.production_sections === "string" && product.production_sections.trim()) {
+    try {
+      return normalizeProductionSections(JSON.parse(product.production_sections));
+    } catch {
+      return normalizeProductionSections(product.production_sections.split(/\r?\n/).map((label) => ({ label })));
+    }
+  }
+  return [];
+}
+
+function renderProductProductionSectionRows(sections = []) {
+  const rows = normalizeProductionSections(sections);
+  const visibleRows = rows.length ? rows : [{ id: "", label: "" }];
+  return visibleRows.map((section, index) => `
+    <div class="product-section-row" data-product-section-row="${index}">
+      <input name="production_section_id" type="hidden" value="${escapeHtml(section.id || "")}" />
+      <label>
+        Nome da sessão
+        <input name="production_section_label" type="text" value="${escapeHtml(section.label || "")}" placeholder="Ex.: Abertura" />
+      </label>
+      <button class="inline-button danger-button" type="button" data-product-remove-section="${index}">Excluir</button>
+    </div>
+  `).join("");
+}
+
+function readProductProductionSectionsFromForm(form) {
+  return Array.from(form.querySelectorAll("[data-product-section-row]"))
+    .map((row, index) => {
+      const label = row.querySelector('[name="production_section_label"]')?.value.trim() || "";
+      const storedId = row.querySelector('[name="production_section_id"]')?.value.trim() || "";
+      const id = storedId || label.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || `secao-${index + 1}`;
+      return { id, label };
+    })
+    .filter((section) => section.label);
+}
+
+function readProductSaleOptionsFromForm(form) {
+  return Array.from(form.querySelectorAll("[data-product-variation-row]"))
+    .map((row) => {
+      const code = row.querySelector('[name="sale_option_code"]')?.value.trim() || "";
+      const label = row.querySelector('[name="sale_option_label"]')?.value.trim() || "";
+      const price = parseCurrencyInput(row.querySelector('[name="sale_option_price"]')?.value || 0);
+      const productionQuantity = normalizeWholeNumber(row.querySelector('[name="sale_option_production_quantity"]')?.value || 1, { min: 0, fallback: 1 });
+      const currentStock = normalizeWholeNumber(row.querySelector('[name="sale_option_current_stock"]')?.value || 0, { min: 0, fallback: 0 });
+      const minimumStock = normalizeWholeNumber(row.querySelector('[name="sale_option_minimum_stock"]')?.value || 0, { min: 0, fallback: 0 });
+      const kitStructureId = row.querySelector('[name="sale_option_kit_structure_id"]')?.value || "";
+      return {
+        id: code || label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""),
+        code,
+        label,
+        price,
+        production_quantity: productionQuantity,
+        current_stock: currentStock,
+        minimum_stock: minimumStock,
+        kit_structure_id: kitStructureId,
+      };
+    })
+    .filter((option) => option.code || option.label || option.price > 0 || option.production_quantity > 0)
+    .filter((option) => option.code && option.label);
+}
+
+function findProductSaleOption(product, optionId) {
+  return normalizeProductSaleOptions(product).find((option) =>
+    option.id === optionId || option.code === optionId || option.label === optionId
+  ) || null;
+}
+
+function updateProductSaleOptionStock(product, optionId, nextStock) {
+  let matched = false;
+  const saleOptions = normalizeProductSaleOptions(product).map((option) => {
+    if (option.id !== optionId && option.code !== optionId && option.label !== optionId) {
+      return option;
+    }
+    matched = true;
+    return {
+      ...option,
+      current_stock: nextStock,
+    };
+  });
+
+  return matched ? saleOptions : null;
 }
 
 function bomStructureActionCell(item, canEdit) {
@@ -6396,6 +7048,7 @@ function bomStructureActionCell(item, canEdit) {
   return `
     <div class="action-button-group">
       <button class="inline-button" type="button" data-bom-structure-edit-id="${item.id}">Editar</button>
+      <button class="inline-button" type="button" data-bom-structure-duplicate-id="${item.id}">Duplicar</button>
       <button class="inline-button danger-button" type="button" data-delete-table="bom_structures" data-delete-id="${item.id}">Excluir</button>
     </div>
   `;
@@ -6403,6 +7056,7 @@ function bomStructureActionCell(item, canEdit) {
 
 function renderProductForm() {
   const isEditing = state.productFormMode === "edit";
+  const categoryOptions = buildProductCategoryOptions().filter((option) => option.value !== "all");
 
   return `
     <section class="module-subpanel">
@@ -6417,16 +7071,29 @@ function renderProductForm() {
         <input type="hidden" name="edit_id" />
 
         <div class="form-section form-section-full">
-          <h4>Informacoes Basicas</h4>
+          <h4>Informações Básicas</h4>
           <div class="product-form-row">
-            ${inputField("code", "Codigo")}
+            ${inputField("code", "Código")}
             ${inputField("name", "Nome")}
             ${selectField("status", "Status", [
               { value: "active", label: "Ativo" },
               { value: "inactive", label: "Inativo" },
             ])}
-            ${selectField("category", "Categoria", [
-              { value: "raw_material", label: "Materia-prima" },
+            ${selectField("available_for_sale", "Aparece em Vendas", [
+              { value: "true", label: "Sim" },
+              { value: "false", label: "Não" },
+            ])}
+            <label>
+              Categoria
+              <input name="category" list="product-category-suggestions" value="Produtos em geral" placeholder="Digite ou selecione uma categoria" required />
+              <datalist id="product-category-suggestions">
+                ${categoryOptions
+                  .map((option) => `<option value="${escapeHtml(option.label)}"></option>`)
+                  .join("")}
+              </datalist>
+            </label>
+            ${selectField("product_type", "Tipo do produto", [
+              { value: "raw_material", label: "Matéria-prima" },
               { value: "finished_product", label: "Produto acabado" },
             ])}
           </div>
@@ -6436,7 +7103,7 @@ function renderProductForm() {
           <h4>Estoque</h4>
           <div class="product-form-row">
             ${inputField("unit", "Unidade", "text", "kg")}
-            ${inputField("minimum_stock", "Estoque Minimo", "number", "0")}
+            ${inputField("minimum_stock", "Estoque Mínimo", "number", "0")}
             ${inputField("current_stock", "Estoque Atual", "number", "0")}
           </div>
         </div>
@@ -6447,6 +7114,34 @@ function renderProductForm() {
             ${currencyInputField("cost_price", "Preco de Custo")}
             ${currencyInputField("sale_price", "Preco de Venda")}
           </div>
+          <div class="product-variations-panel">
+            <div class="product-variations-head">
+              <strong>Variações de venda</strong>
+              <button class="inline-button" type="button" data-product-add-variation>Adicionar variação</button>
+            </div>
+            <div class="product-variations-list" data-product-variations-list>
+              ${renderProductSaleVariationRows([])}
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section form-section-full">
+          <h4>Sessões internas de produção</h4>
+          <div class="product-form-row">
+            ${selectField("has_production_sections", "Produto tem sessões?", [
+              { value: "false", label: "Não" },
+              { value: "true", label: "Sim" },
+            ])}
+          </div>
+          <div class="product-sections-panel hidden" data-product-sections-panel>
+            <div class="product-variations-head">
+              <strong>Sessões do produto</strong>
+              <button class="inline-button" type="button" data-product-add-section>Adicionar sessão</button>
+            </div>
+            <div class="product-sections-list" data-product-sections-list>
+              ${renderProductProductionSectionRows([])}
+            </div>
+          </div>
         </div>
 
         <div class="form-section form-section-full">
@@ -6454,14 +7149,32 @@ function renderProductForm() {
           <div class="product-form-row">
             ${optionalInputField("supplier", "Fornecedor")}
             ${optionalInputField("batch", "Lote")}
+            ${optionalInputField("machine_serial", "Série da Máquina")}
             ${optionalInputField("expiration_date", "Validade", "date")}
-            ${optionalInputField("location", "Localizacao", "text", "Almox A1")}
+            ${optionalInputField("location", "Localização", "text", "Almox A1")}
           </div>
         </div>
 
         <div class="form-section form-section-full">
-          <h4>Descricao</h4>
-          ${textAreaField("description", "Descricao")}
+          <h4>Foto</h4>
+          <div class="product-photo-form-grid">
+            <label>
+              Imagem do produto
+              <input name="product_photo_file" type="file" accept="image/*" />
+            </label>
+            <label>
+              Foto atual
+              <input name="photo_data_url" type="hidden" />
+              <div class="product-photo-preview" data-product-photo-preview>
+                <span class="muted">Nenhuma foto cadastrada</span>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <div class="form-section form-section-full">
+          <h4>Descrição</h4>
+          ${textAreaField("description", "Descrição")}
         </div>
 
         <div class="form-actions-row form-section-full">
@@ -6474,11 +7187,27 @@ function renderProductForm() {
 }
 
 function renderProductMovementPanel(product) {
+  const saleOptions = normalizeProductSaleOptions(product);
+  const saleOptionField = saleOptions.length
+    ? `
+      <label>
+        Variação
+        <select name="sale_option_id">
+          <option value="">Produto base</option>
+          ${saleOptions.map((option) => `
+            <option value="${escapeHtml(option.id)}">
+              ${escapeHtml(`${option.code ? `${option.code} - ` : ""}${option.label} | saldo ${formatQuantity(option.current_stock)}`)}
+            </option>
+          `).join("")}
+        </select>
+      </label>
+    `
+    : "";
   return `
     <section class="module-subpanel movement-panel">
       <div class="module-head compact-head">
         <div>
-          <p class="eyebrow muted">Movimentacao de estoque</p>
+          <p class="eyebrow muted">Movimentação de estoque</p>
           <h3>${product.name}</h3>
           <p class="muted">Saldo atual ${formatQuantity(product.current_stock)} ${product.unit} | Lote ${product.batch || "-"}</p>
         </div>
@@ -6486,13 +7215,14 @@ function renderProductMovementPanel(product) {
 
       <form id="product-movement-form" class="movement-form-grid">
         <input type="hidden" name="product_id" value="${product.id}" />
+        ${saleOptionField}
         ${selectField("movement_type", "Tipo", [
           { value: "entry", label: "Entrada" },
-          { value: "exit", label: "Saida" },
+          { value: "exit", label: "Saída" },
         ])}
         ${inputField("movement_quantity", "Quantidade", "number", "0")}
         <div class="form-actions-row">
-          <button class="secondary-button" type="submit">Confirmar Movimentacao</button>
+          <button class="secondary-button" type="submit">Confirmar Movimentação</button>
           <button class="ghost-button" type="button" data-product-movement-cancel>Fechar</button>
         </div>
       </form>
@@ -6505,11 +7235,29 @@ function renderInventoryMovementForm() {
     value: product.id,
     label: `${product.name} (${product.code})`,
   }));
+  const selectedProductId = state.inventoryMovementProductId || "";
+  const selectedProduct = (state.moduleData.products || []).find((product) => product.id === selectedProductId);
+  const saleOptions = normalizeProductSaleOptions(selectedProduct);
+  const saleOptionField = saleOptions.length
+    ? `
+      <label>
+        Variação
+        <select name="sale_option_id" data-inventory-sale-option-field>
+          <option value="">Produto base</option>
+          ${saleOptions.map((option) => `
+            <option value="${escapeHtml(option.id)}" ${option.id === state.inventoryMovementSaleOptionId ? "selected" : ""}>
+              ${escapeHtml(`${option.code ? `${option.code} - ` : ""}${option.label} | saldo ${formatQuantity(option.current_stock)}`)}
+            </option>
+          `).join("")}
+        </select>
+      </label>
+    `
+    : "";
 
   if (!productOptions.length) {
     return `
       <section class="module-subpanel movement-panel">
-        <div class="empty-state">Cadastre ao menos um produto antes de registrar movimentacoes de estoque.</div>
+        <div class="empty-state">Cadastre ao menos um produto antes de registrar movimentações de estoque.</div>
       </section>
     `;
   }
@@ -6518,33 +7266,40 @@ function renderInventoryMovementForm() {
     <section class="module-subpanel movement-panel">
       <div class="module-head compact-head">
         <div>
-          <p class="eyebrow muted">Nova Movimentacao</p>
-          <h3>Nova Movimentacao</h3>
-          <p class="muted">Entrada, saida ou ajuste de estoque.</p>
+          <p class="eyebrow muted">Nova Movimentação</p>
+          <h3>Nova Movimentação</h3>
+          <p class="muted">Entrada, saída ou ajuste de estoque.</p>
         </div>
       </div>
 
       <form id="inventory-movement-form" class="inventory-form-grid">
         <div class="form-section">
           <h4>Dados principais</h4>
-          ${selectField("product_id", "Produto", productOptions)}
+          <label>
+            Produto
+            <select name="product_id" data-inventory-product-field required>
+              <option value="">Selecione...</option>
+              ${productOptions.map((option) => `<option value="${option.value}" ${option.value === selectedProductId ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}
+            </select>
+          </label>
+          ${saleOptionField}
           ${selectField("movement_type", "Tipo", [
             { value: "entry", label: "Entrada" },
-            { value: "exit", label: "Saida" },
+            { value: "exit", label: "Saída" },
             { value: "adjustment", label: "Ajuste" },
           ])}
           ${inputField("quantity", "Quantidade", "number", "0")}
-          ${optionalInputField("machine_serial", "Numero de Serie")}
+          ${optionalInputField("machine_serial", "Número de Série")}
         </div>
 
         <div class="form-section form-section-full">
-          <h4>Observacao</h4>
-          ${textAreaField("notes", "Observacao")}
+          <h4>Observação</h4>
+          ${textAreaField("notes", "Observação")}
         </div>
 
         <div class="form-actions-row form-section-full">
           <button class="ghost-button" type="button" data-inventory-cancel>Voltar</button>
-          <button class="primary-button" type="submit">Salvar Movimentacao</button>
+          <button class="primary-button" type="submit">Salvar Movimentação</button>
         </div>
       </form>
     </section>
@@ -6552,12 +7307,17 @@ function renderInventoryMovementForm() {
 }
 
 function renderBomMaterialsForm() {
+  const bomCategorySuggestions = buildBomMaterialCategoryOptions()
+    .filter((option) => option.value !== "all")
+    .map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`)
+    .join("");
+
   return `
     <section class="module-subpanel">
       <div class="module-head compact-head">
         <div>
-          <p class="eyebrow muted">Nova Peca / Material</p>
-          <h3>Pecas / Materiais</h3>
+          <p class="eyebrow muted">Nova Peça / Material</p>
+          <h3>Peças / Materiais</h3>
         </div>
       </div>
 
@@ -6566,26 +7326,25 @@ function renderBomMaterialsForm() {
         <div class="form-section form-section-full">
           <h4>Dados principais</h4>
           <div class="product-form-row">
-            ${inputField("code", "Codigo")}
+            ${inputField("code", "Código")}
             ${inputField("name", "Nome")}
-            ${selectField("category", "Categoria", [
-              { value: "raw_material", label: "Materia-prima" },
-              { value: "component", label: "Componente" },
-              { value: "subassembly", label: "Subconjunto" },
-              { value: "packaging", label: "Embalagem" },
-            ])}
+            <label>
+              Categoria
+              <input name="category" list="bom-material-category-suggestions" placeholder="Ex.: Componente" required />
+              <datalist id="bom-material-category-suggestions">${bomCategorySuggestions}</datalist>
+            </label>
             ${inputField("unit", "Unidade", "text", "un")}
           </div>
-          ${optionalTextAreaField("description", "Descricao")}
+          ${optionalTextAreaField("description", "Descrição")}
         </div>
 
         <div class="form-section form-section-full">
           <h4>Custos e estoque</h4>
           <div class="product-form-row">
-            ${currencyInputField("unit_cost", "Custo Unitario")}
+            ${currencyInputField("unit_cost", "Custo Unitário")}
             ${optionalInputField("supplier", "Fornecedor")}
             ${inputField("current_stock", "Estoque Atual", "number", "0")}
-            ${inputField("minimum_stock", "Estoque Minimo", "number", "0")}
+            ${inputField("minimum_stock", "Estoque Mínimo", "number", "0")}
           </div>
           <div class="product-form-row">
             ${selectField("status", "Status", [
@@ -6610,20 +7369,36 @@ function renderBomStructuresForm(totalStructureCost) {
     value: product.id,
     label: `${product.name} (${product.code})`,
   }));
-  const materialOptions = state.moduleData.bomMaterials || [];
+  const finalProductVariationOptions = getBomFinalProductVariationOptions();
+  const finalProductVariationField = finalProductVariationOptions.length
+    ? `
+      <label>
+        Variação do produto final
+        <select data-bom-structure-field="sale_option_id" name="sale_option_id">
+          <option value="">Sem variação</option>
+          ${finalProductVariationOptions.map((option) => `
+            <option value="${escapeHtml(option.value)}" ${option.value === draft.sale_option_id ? "selected" : ""}>
+              ${escapeHtml(option.label)}
+            </option>
+          `).join("")}
+        </select>
+      </label>
+    `
+    : "";
+  const componentOptions = buildBomComponentOptions();
 
   if (!productOptions.length) {
     return `
       <section class="module-subpanel">
-        <div class="empty-state">Cadastre ao menos um produto no modulo Produtos para criar um conjunto BOM.</div>
+        <div class="empty-state">Cadastre ao menos um produto no módulo Produtos para criar um conjunto BOM.</div>
       </section>
     `;
   }
 
-  if (!materialOptions.length) {
+  if (!componentOptions.length) {
     return `
       <section class="module-subpanel">
-        <div class="empty-state">Cadastre ao menos uma peca em Pecas / Materiais antes de montar um conjunto BOM.</div>
+        <div class="empty-state">Cadastre ao menos um produto, peça/material ou conjunto ativo antes de montar um conjunto BOM.</div>
       </section>
     `;
   }
@@ -6643,13 +7418,15 @@ function renderBomStructuresForm(totalStructureCost) {
           <h4>Dados principais</h4>
           <div class="product-form-row">
             ${draftSelectField("product_id", "Produto final", draft.product_id, productOptions, true)}
+            ${finalProductVariationField}
             ${draftInputField("version", "Versao", draft.version, "text", "1.0", false, true)}
           </div>
         </div>
 
         <div class="form-section form-section-full">
-          <h4>Producao</h4>
+          <h4>Produção</h4>
           <div class="product-form-row">
+            ${draftInputField("category", "Categoria do BOM", draft.category, "text", "Ex.: Linha, Família, Cliente")}
             ${draftInputField("batch_size", "Tamanho do lote", draft.batch_size, "number", "1", false, true)}
             ${draftInputField("batch_unit", "Unidade do lote", draft.batch_unit, "text", "un", false, true)}
             ${draftSelectField("status", "Status", draft.status, [
@@ -6664,7 +7441,7 @@ function renderBomStructuresForm(totalStructureCost) {
             <div>
               <h4>Itens do Conjunto</h4>
             </div>
-            <button class="secondary-button" type="button" data-bom-add-item>+ Adicionar peca</button>
+            <button class="secondary-button" type="button" data-bom-add-item>+ Adicionar peça</button>
           </div>
           <div class="bom-items-list">
             ${state.bomDraftItems.map((item, index) => renderBomDraftItemRow(item, index)).join("")}
@@ -6680,8 +7457,8 @@ function renderBomStructuresForm(totalStructureCost) {
         </div>
 
         <div class="form-section form-section-full">
-          <h4>Instrucoes de Producao</h4>
-          ${draftTextAreaField("instructions", "Instrucoes de producao", draft.instructions)}
+          <h4>Instruções de Produção</h4>
+          ${draftTextAreaField("instructions", "Instruções de produção", draft.instructions)}
           <div class="product-form-row">
             ${draftInputField("height", "Altura", draft.height, "number", "0")}
             ${draftInputField("width", "Largura", draft.width, "number", "0")}
@@ -6697,7 +7474,7 @@ function renderBomStructuresForm(totalStructureCost) {
               ${renderBomAttachmentPreviews()}
             </div>
           </div>
-          ${draftTextAreaField("notes", "Observacoes", draft.notes)}
+          ${draftTextAreaField("notes", "Observações", draft.notes)}
         </div>
 
         <div class="form-actions-row form-section-full bom-form-actions">
@@ -6719,28 +7496,62 @@ function renderBomDraftItemRow(item, index) {
       `
     )
     .join("");
+  const variationOptions = getBomDraftItemVariationOptions(item);
+  const variationField = variationOptions.length
+    ? `
+      <label>
+        Variação
+        <select id="bom-item-${index}-sale-option" data-bom-item-field="saleOptionId" data-bom-item-index="${index}">
+          <option value="">Sem variação</option>
+          ${variationOptions.map((option) => `
+            <option value="${escapeHtml(option.value)}" ${option.value === item.saleOptionId ? "selected" : ""}>
+              ${escapeHtml(option.label)}
+            </option>
+          `).join("")}
+        </select>
+      </label>
+    `
+    : "";
+  const productionSections = getBomFinalProductProductionSections();
+  const sectionField = productionSections.length
+    ? `
+      <label>
+        Sessão interna
+        <select id="bom-item-${index}-section" data-bom-item-field="productionSectionId" data-bom-item-index="${index}">
+          <option value="">Sem sessão</option>
+          ${productionSections.map((section) => `
+            <option value="${escapeHtml(section.id)}" ${section.id === item.productionSectionId ? "selected" : ""}>
+              ${escapeHtml(section.label)}
+            </option>
+          `).join("")}
+        </select>
+      </label>
+    `
+    : "";
   const details = getBomDraftItemComputed(item);
 
   return `
     <div class="bom-item-row">
       <label>
-        Peca selecionada
-        <select data-bom-item-field="sourceKey" data-bom-item-index="${index}">
+        Item selecionado
+        <select id="bom-item-${index}-source" data-bom-item-field="sourceKey" data-bom-item-index="${index}">
           <option value="">Selecione...</option>
           ${options}
         </select>
       </label>
+      ${variationField}
+      ${sectionField}
       <label>
         Quantidade
-        <input data-bom-item-field="quantity" data-bom-item-index="${index}" type="number" min="0" step="0.0001" value="${item.quantity}" />
+        <input id="bom-item-${index}-quantity" data-bom-item-field="quantity" data-bom-item-index="${index}" type="number" min="1" step="1" value="${item.quantity}" />
       </label>
       <label>
-        Custo unitario
-        <input type="text" value="${formatCurrency(details.unitCost)}" readonly />
+        Custo unitário
+        <input id="bom-item-${index}-unit-cost" data-bom-item-field="unitCost" data-bom-item-index="${index}" type="number" min="0" step="0.01" value="${escapeHtml(details.unitCost)}" />
       </label>
       <label>
         Custo total
-        <input type="text" value="${formatCurrency(details.totalCost)}" readonly />
+        <input type="text" data-bom-item-total="${index}" value="${formatCurrency(details.totalCost)}" readonly />
       </label>
       <button class="inline-button danger-button" type="button" data-bom-remove-item="${index}">Remover</button>
     </div>
@@ -6788,10 +7599,14 @@ function productStatusCell(status) {
 }
 
 function productCategoryCell(category) {
-  const config = category === "finished_product"
-    ? { label: "Produto acabado", className: "product-category-finished" }
-    : { label: "Materia-prima", className: "product-category-raw" };
-  return `<span class="status-chip ${config.className}">${config.label}</span>`;
+  const value = normalizeCategoryInput(category, "general_products");
+  return `<span class="status-chip product-category-custom">${escapeHtml(formatCategoryLabel(value))}</span>`;
+}
+
+function productTypeCell(productType) {
+  const value = normalizeProductTypeInput(productType);
+  const className = value === "finished_product" ? "product-category-finished" : "product-category-raw";
+  return `<span class="status-chip ${className}">${escapeHtml(formatProductTypeLabel(value))}</span>`;
 }
 
 function productStockCell(item) {
@@ -6806,7 +7621,7 @@ function productStockCell(item) {
 function inventoryMovementTypeCell(type) {
   const mapping = {
     entry: { label: "Entrada", className: "movement-entry" },
-    exit: { label: "Saida", className: "movement-exit" },
+    exit: { label: "Saída", className: "movement-exit" },
     adjustment: { label: "Ajuste", className: "movement-adjustment" },
   };
 
@@ -6824,28 +7639,204 @@ function bomStructureStatusCell(status) {
 
 function formatCategoryLabel(category) {
   const labels = {
-    raw_material: "Materia prima",
-    finished_product: "Produto acabado",
+    general_products: "Produtos em geral",
+    raw_material: "Produtos em geral",
+    finished_product: "Produtos em geral",
     packaging: "Embalagem",
     consumable: "Insumo",
   };
 
-  return labels[category] || category || "-";
+  return labels[category] || formatFreeTextCategory(category);
+}
+
+function formatProductTypeLabel(productType) {
+  const labels = {
+    raw_material: "Matéria-prima",
+    finished_product: "Produto acabado",
+  };
+
+  return labels[normalizeProductTypeInput(productType)] || formatFreeTextCategory(productType);
 }
 
 function formatBomCategory(category) {
   const labels = {
-    raw_material: "Materia-prima",
+    raw_material: "Matéria-prima",
     component: "Componente",
     subassembly: "Subconjunto",
     packaging: "Embalagem",
   };
 
-  return labels[category] || category || "-";
+  return labels[category] || formatFreeTextCategory(category);
+}
+
+function formatFreeTextCategory(category) {
+  const value = String(category || "").trim();
+  if (!value) return "-";
+  return value
+    .replaceAll("_", " ")
+    .replaceAll("-", " ")
+    .replace(/\s+/g, " ")
+    .replace(/\b\p{L}/gu, (char) => char.toLocaleUpperCase("pt-BR"));
+}
+
+function normalizeCategoryInput(value, fallback = "geral") {
+  const raw = String(value || "").trim();
+  if (!raw) return fallback;
+  const normalized = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const aliases = {
+    "materia prima": "general_products",
+    "matéria prima": "general_products",
+    "produto acabado": "general_products",
+    acabado: "general_products",
+    "produtos em geral": "general_products",
+    embalagem: "packaging",
+    insumo: "consumable",
+    componente: "component",
+    subconjunto: "subassembly",
+    geral: "geral",
+    general: "general",
+  };
+  return aliases[normalized] || raw;
+}
+
+function normalizeProductTypeInput(value, fallback = "raw_material") {
+  const normalized = String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const aliases = {
+    "materia prima": "raw_material",
+    raw_material: "raw_material",
+    "raw material": "raw_material",
+    "produto acabado": "finished_product",
+    finished_product: "finished_product",
+    "finished product": "finished_product",
+    acabado: "finished_product",
+  };
+  return aliases[normalized] || fallback;
+}
+
+function getProductType(product) {
+  if (!product) return "raw_material";
+  if (product.product_type) return normalizeProductTypeInput(product.product_type);
+  const normalizedValues = [product.category, product.code, product.name].map((value) =>
+    String(value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[_-]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+  );
+  return normalizedValues.some((value) =>
+    value === "produto acabado"
+    || value === "finished product"
+    || value === "finished_product"
+    || value === "acabado"
+    || value.startsWith("kit")
+    || value.startsWith("caps05")
+    || value.startsWith("caps10")
+    || ["bombas", "misturadores", "polidoras", "encapsuladoras"].includes(value)
+  )
+    ? "finished_product"
+    : "raw_material";
+}
+
+function getProductCategory(product) {
+  const category = normalizeCategoryInput(product?.category, "general_products");
+  return category === "geral" || category === "general" ? "general_products" : category;
+}
+
+function buildCategoryOptions(items, formatter, baseOptions = []) {
+  const seen = new Set();
+  const options = [];
+  const addOption = (value, label = "") => {
+    const normalized = String(value || "").trim();
+    if (!normalized || seen.has(normalized.toLowerCase())) return;
+    seen.add(normalized.toLowerCase());
+    options.push({ value: normalized, label: label || formatter(normalized) });
+  };
+
+  baseOptions.forEach((option) => addOption(option.value, option.label));
+  (items || []).forEach((item) => addOption(item.category));
+  return options;
+}
+
+function buildProductCategoryOptions() {
+  const normalizedProducts = (state.moduleData.products || []).map((item) => ({
+    ...item,
+    category: normalizeCategoryInput(item.category, "general_products"),
+  }));
+  return [
+    { value: "all", label: "Todas categorias" },
+    ...buildCategoryOptions(normalizedProducts, formatCategoryLabel, [
+      { value: "general_products", label: "Produtos em geral" },
+      { value: "packaging", label: "Embalagem" },
+      { value: "consumable", label: "Insumo" },
+    ]),
+  ];
+}
+
+function buildBomMaterialCategoryOptions() {
+  return [
+    { value: "all", label: "Todas categorias" },
+    ...buildCategoryOptions(state.moduleData.bomMaterials || [], formatBomCategory, [
+      { value: "raw_material", label: "Matéria-prima" },
+      { value: "component", label: "Componente" },
+      { value: "subassembly", label: "Subconjunto" },
+      { value: "packaging", label: "Embalagem" },
+    ]),
+  ];
 }
 
 function formatQuantity(value) {
-  return Number(value || 0).toFixed(2);
+  return formatWholeQuantity(value);
+}
+
+function formatWholeQuantity(value) {
+  return String(Math.max(0, Math.round(Number(value || 0))));
+}
+
+function normalizeWholeNumber(value, { min = 0, fallback = 0 } = {}) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return fallback;
+  }
+  return Math.max(min, Math.round(numericValue));
+}
+
+const WHOLE_NUMBER_FIELD_NAMES = new Set([
+  "quantity",
+  "movement_quantity",
+  "minimum_stock",
+  "current_stock",
+  "batch_size",
+  "height",
+  "width",
+  "length",
+  "weight",
+  "sale_option_production_quantity",
+  "sale_option_current_stock",
+  "sale_option_minimum_stock",
+  "delivery_days",
+  "validity_days",
+]);
+
+function getWholeNumberInputAttributes(name, type) {
+  if (type !== "number" || !WHOLE_NUMBER_FIELD_NAMES.has(name)) {
+    return "";
+  }
+  const min = name === "quantity" || name === "movement_quantity" || name === "batch_size" ? 1 : 0;
+  return ` min="${min}" step="1" inputmode="numeric"`;
 }
 
 function parseCurrencyInput(value) {
@@ -6875,6 +7866,15 @@ function parseCurrencyInput(value) {
 
   const parsed = Number(`${negative ? "-" : ""}${sanitized}`);
   return Number.isFinite(parsed) ? Math.round(parsed * 100) / 100 : 0;
+}
+
+function normalizePercentInput(value, fallback = 0) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return fallback;
+  const normalized = raw.replace(",", ".").replace(/[^\d.-]/g, "");
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(100, Math.max(0, parsed));
 }
 
 function serializeCurrencyNumber(value) {
@@ -6964,17 +7964,17 @@ function getModuleSubtitle(moduleKey) {
     dashboard: "Painel estrategico do administrador",
     products: "Cadastro mestre e controle de estoque",
     bom: "Estrutura de materiais",
-    inventory: "Movimentacoes e controle de saldo",
-    production: "Gerencie ordens de producao",
-    service_orders: "Servicos internos e externos com rastreabilidade completa",
-    machining: "Pecas, processos e workflow por etapas",
+    inventory: "Movimentações e controle de saldo",
+    production: "Gerencie ordens de produção",
+    service_orders: "Serviços internos e externos com rastreabilidade completa",
+    machining: "Peças, processos e workflow por etapas",
     customers: "Relacionamento comercial",
     sales: "Pedidos e faturamento",
-    purchases: "Fluxo de solicitacoes, compra e conclusao",
-    reports: "Consolidado gerencial e analitico da operacao",
-    vps: "Painel tecnico exclusivo para o setor de TI",
+    purchases: "Fluxo de solicitações, compra e conclusao",
+    reports: "Consolidado gerencial e analítico da operação",
+    vps: "Painel técnico exclusivo para o setor de TI",
     audit: "Central unica de logs, rastreabilidade e auditoria",
-    permissions: "Configure papeis, permissoes e funcionarios",
+    permissions: "Configure papeis, permissões e funcionários",
   };
 
   return subtitles[moduleKey] || "Painel operacional";
@@ -6983,7 +7983,7 @@ function getModuleSubtitle(moduleKey) {
 function getAuditKnownModules() {
   const base = MODULES.map((module) => ({ value: module.key, label: module.label }));
   if (!base.some((module) => module.value === "reports")) {
-    base.push({ value: "reports", label: "Relatorios" });
+    base.push({ value: "reports", label: "Relatórios" });
   }
   return base;
 }
@@ -7016,9 +8016,9 @@ async function resolveClientIp() {
   try {
     const response = await fetch("https://api.ipify.org?format=json", { cache: "no-store" });
     const data = await response.json();
-    state.clientIp = String(data?.ip || "").trim() || "Nao identificado";
+    state.clientIp = String(data?.ip || "").trim() || "Não identificado";
   } catch {
-    state.clientIp = readCachedClientIp() || "Nao identificado";
+    state.clientIp = readCachedClientIp() || "Não identificado";
   }
 
   localStorage.setItem(CLIENT_IP_STORAGE_KEY, state.clientIp);
@@ -7041,7 +8041,7 @@ function buildAuditLogPayload({
     usuario_id: state.currentUser?.user_id || state.currentUser?.id || null,
     usuario_nome: getLoggedUserName("-"),
     usuario_perfil: getCurrentUserAuditProfile(),
-    ip: state.clientIp || readCachedClientIp() || "Nao identificado",
+    ip: state.clientIp || readCachedClientIp() || "Não identificado",
     item_afetado: itemAffected || null,
     descricao: description || null,
     nivel: level,
@@ -7076,7 +8076,7 @@ function trackModuleAccessIfNeeded() {
     action: "acesso_tela",
     level: "Informativo",
     itemAffected: getModuleLabel(state.activeModule),
-    description: `Acesso ao modulo ${getModuleLabel(state.activeModule)}.`,
+    description: `Acesso ao módulo ${getModuleLabel(state.activeModule)}.`,
     entityType: "module",
     entityId: state.activeModule,
   });
@@ -7086,7 +8086,7 @@ function renderAuditLevelBadge(level) {
   const normalized = String(level || "Informativo");
   const classMap = {
     Informativo: "status-completed",
-    Atencao: "status-planned",
+    Atenção: "status-planned",
     Critico: "status-cancelled",
   };
   return `<span class="status-chip ${classMap[normalized] || "status-planned"}">${escapeHtml(normalized)}</span>`;
@@ -7116,7 +8116,7 @@ function buildAuditExportHtml(logs) {
       <header class="sales-document-header">
         <div>
           <h2>Central de Logs / Auditoria</h2>
-          <p>Exportacao consolidada dos registros filtrados.</p>
+          <p>Exportação consolidada dos registros filtrados.</p>
         </div>
         <div class="sales-document-meta">
           <strong>${formatDateTime(new Date().toISOString())}</strong>
@@ -7127,12 +8127,12 @@ function buildAuditExportHtml(logs) {
         <thead>
           <tr>
             <th>Data</th>
-            <th>Modulo</th>
-            <th>Acao</th>
-            <th>Usuario</th>
+            <th>Módulo</th>
+            <th>Ação</th>
+            <th>Usuário</th>
             <th>Item</th>
-            <th>Descricao</th>
-            <th>Nivel</th>
+            <th>Descrição</th>
+            <th>Nível</th>
           </tr>
         </thead>
         <tbody>${rows || `<tr><td colspan="7">Nenhum log encontrado.</td></tr>`}</tbody>
@@ -7146,7 +8146,7 @@ function formatStaffRole(role) {
   if (normalizedRole === "ADMINISTRADOR") {
     return "ADMINISTRADOR";
   }
-  return normalizedRole || "Usuario";
+  return normalizedRole || "Usuário";
 }
 
 function normalizePermissionRoleName(role) {
@@ -7167,11 +8167,15 @@ function isPermissionsAdminRole(role) {
 }
 
 function isTiUser() {
-  return String(state.currentUser?.role || "").trim() === "TI";
+  return normalizePermissionRoleName(
+    state.currentUser?.permission_role_name || state.currentUser?.role || state.currentUser?.department
+  ) === "TI";
 }
 
 function isPermissionsAdmin() {
-  return isPermissionsAdminRole(state.currentUser?.role);
+  return isPermissionsAdminRole(
+    state.currentUser?.permission_role_name || state.currentUser?.role || state.currentUser?.department
+  );
 }
 
 function getDefaultRolePermissions() {
@@ -7261,6 +8265,59 @@ function createEmptyReportsFilters() {
   };
 }
 
+function createEmptyPayablesFilters() {
+  const today = new Date().toISOString().slice(0, 10);
+  return {
+    search: "",
+    from: getDateShiftedIso(today, -30),
+    to: getDateShiftedIso(today, 30),
+    status: "all",
+    category: "all",
+    type: "all",
+  };
+}
+
+function createEmptyPayableDraft() {
+  return {
+    edit_id: "",
+    payable_number: "",
+    description: "",
+    supplier: "",
+    category: "Serviços",
+    amount: "",
+    due_date: new Date().toISOString().slice(0, 10),
+    payment_method: "",
+    status: "pending",
+    account_type: "variable",
+    frequency: "monthly",
+    auto_generate: false,
+    purchase_request_id: "",
+    purchase_request_number: "",
+    source_module: "",
+    generated_from_payable_id: "",
+    notes: "",
+    attachments: [],
+  };
+}
+
+function createEmptyPayablePaymentDraft() {
+  return {
+    payable_id: "",
+    payment_date: new Date().toISOString().slice(0, 10),
+    payment_method: "",
+    payment_notes: "",
+  };
+}
+
+function createEmptyPayablesAlertState() {
+  return {
+    upcomingSignature: "",
+    todaySignature: "",
+    overdueSignature: "",
+    lastOverdueAt: 0,
+  };
+}
+
 function createEmptyEmployeeDraft() {
   return {
     id: "",
@@ -7277,6 +8334,9 @@ function createEmptyEmployeeDraft() {
 function createEmptyBomDraftItem() {
   return {
     sourceKey: "",
+    saleOptionId: "",
+    productionSectionId: "",
+    unitCost: "",
     quantity: "1",
   };
 }
@@ -7314,6 +8374,7 @@ function createEmptyMachiningDraft() {
     edit_id: "",
     code: "",
     name: "",
+    finished_product_id: "",
     finished_name: "",
     material: "",
     description: "",
@@ -7337,6 +8398,7 @@ function createEmptyCustomerDraft() {
     name: "",
     cnpj: "",
     cpf: "",
+    state_registration: "",
     email: "",
     phone: "",
     contact: "",
@@ -7352,6 +8414,10 @@ function createEmptySalesItemDraft() {
     product_id: "",
     product_name: "",
     product_code: "",
+    sale_option_id: "",
+    sale_option_label: "",
+    kit_structure_id: "",
+    production_quantity: "",
     quantity: "1",
     unit_price: 0,
     discount: 0,
@@ -7359,6 +8425,9 @@ function createEmptySalesItemDraft() {
 }
 
 function createEmptySalesDraft(status = "quote") {
+  const today = new Date().toISOString().slice(0, 10);
+  const defaultValidityDate = addFrequency(today, "weekly");
+
   return {
     edit_id: "",
     customer_id: "",
@@ -7366,15 +8435,29 @@ function createEmptySalesDraft(status = "quote") {
     cnpj: "",
     address: "",
     invoice_number: "",
-    sale_date: "",
-    delivery_date: "",
+    sale_date: status === "quote" ? today : "",
+    delivery_date: status === "quote" ? defaultValidityDate : "",
+    delivery_days: "",
+    priority: "media",
     payment_method: "",
+    payment_conditions: [createEmptySalesPaymentCondition()],
     status,
     contract_number: "",
     contract_notes: "",
     items: [createEmptySalesItemDraft()],
     production_generated: false,
     production_order_ids: [],
+  };
+}
+
+function createEmptySalesPaymentCondition(overrides = {}) {
+  return {
+    id: overrides.id || `payment-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    method: overrides.method || "",
+    amount: overrides.amount ?? "",
+    percentage: overrides.percentage ?? "",
+    installments: overrides.installments || 1,
+    notes: overrides.notes || "",
   };
 }
 
@@ -7410,12 +8493,25 @@ function createEmptyPurchaseConclusionDraft() {
     invoice_number: "",
     supplier: "",
     purchase_date: "",
+    due_date: "",
     payment_method: "",
     total_amount: "",
     purchase_notes: "",
     order_files: [],
     invoice_files: [],
     attachment_files: [],
+    boleto_files: [],
+    installments: [createEmptyPurchaseInstallmentDraft(1)],
+    stock_entries: [],
+  };
+}
+
+function createEmptyPurchaseInstallmentDraft(number = 1) {
+  return {
+    id: `purchase-installment-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    installment_number: number,
+    due_date: "",
+    amount: "",
     boleto_files: [],
   };
 }
@@ -7454,6 +8550,9 @@ function createDefaultSalesDocumentSettings() {
       responsible_role: "Comercial",
       signature: "",
     },
+    commercial: {
+      pix_discount_percent: 0,
+    },
     numbering: {
       quote_prefix: "ORC",
       sale_prefix: "VEN",
@@ -7478,98 +8577,110 @@ function createDefaultSalesTemplate(type) {
   const defaults = {
     quote: {
       type: "quote",
-      name: "Modelo Padrao de Orcamento",
-      title: "Orcamento Comercial",
+      name: "Modelo Padrão de Orçamento",
+      title: "Orçamento Comercial",
       header: "Proposta comercial elaborada para {{cliente_nome}}.",
-      footer: "Agradecemos a oportunidade e ficamos a disposicao para alinhar os proximos passos.",
+      footer: "Agradecemos a oportunidade e ficamos à disposição para alinhar os próximos passos.",
       presentation_text: "Apresentamos abaixo a proposta comercial conforme escopo solicitado.",
       validity_days: "7",
-      notes: "Valores sujeitos a confirmacao de estoque e aprovacao comercial.",
+      notes: "Valores sujeitos a confirmação de estoque e aprovação comercial.",
       payment_terms: "50% no pedido e 50% na entrega.",
-      delivery_terms: "Entrega em ate 15 dias uteis apos aprovacao.",
-      warranty: "Garantia de 12 meses contra defeitos de fabricacao.",
-      signature: "{{empresa_responsavel}}\n{{empresa_responsavel_cargo}}",
+      delivery_terms: "Entrega em até 15 dias úteis após aprovação.",
+      warranty: "Garantia de 12 meses contra defeitos de fabricação.",
+      signature: "{{empresa_nome}}\nCNPJ: {{empresa_cnpj}}\nRepresentante: {{empresa_responsavel}}\n{{empresa_responsavel_cargo}}\n\nCliente: {{cliente_nome}}\nCNPJ: {{cliente_cnpj}}",
       contact_details: "{{empresa_telefone}} | {{empresa_email}} | {{empresa_site}}",
-      final_message: "Se desejar, podemos revisar quantidades, prazos e condicoes comerciais.",
+      final_message: "Se desejar, podemos revisar quantidades, prazos e condições comerciais.",
+      pdf_template_name: "",
+      pdf_template_data_url: "",
+      pdf_template_updated_at: "",
       body_html: `
         <section>
           <h2>{{documento_titulo}}</h2>
           <p>{{texto_apresentacao}}</p>
           <p><strong>Cliente:</strong> {{cliente_nome}}</p>
           <p><strong>Data:</strong> {{data}}</p>
-          <p><strong>Numero:</strong> {{numero_documento}}</p>
+          <p><strong>Número:</strong> {{numero_documento}}</p>
           {{itens}}
           <p><strong>Subtotal:</strong> {{valor_subtotal}}</p>
           <p><strong>Desconto:</strong> {{valor_desconto}}</p>
           <p><strong>Total:</strong> {{valor_total}}</p>
-          <p><strong>Pagamento:</strong> {{forma_pagamento}}</p>
+          <p><strong>Pagamento:</strong> {{condicoes_pagamento}}</p>
           <p><strong>Prazo de entrega:</strong> {{prazo_entrega}}</p>
-          <p><strong>Validade:</strong> {{validade_orcamento}}</p>
+          <p><strong>Validade do orçamento:</strong> {{validade_orcamento}}</p>
           <p><strong>Garantia:</strong> {{garantia}}</p>
-          <p><strong>Observacoes:</strong> {{observacoes}}</p>
+          <p><strong>Observações:</strong> {{observacoes}}</p>
           <p><strong>Mensagem final:</strong> {{mensagem_final}}</p>
         </section>
       `.trim(),
     },
     sale: {
       type: "sale",
-      name: "Modelo Padrao de Venda",
-      title: "Confirmacao de Venda",
-      header: "Documento comercial referente a venda formalizada com {{cliente_nome}}.",
-      footer: "Documento emitido automaticamente pelo modulo comercial.",
-      presentation_text: "Registramos abaixo as condicoes comerciais da venda fechada.",
+      name: "Modelo Padrão de Venda",
+      title: "Confirmação de Venda",
+      header: "Documento comercial referente à venda formalizada com {{cliente_nome}}.",
+      footer: "Documento emitido automaticamente pelo módulo comercial.",
+      presentation_text: "Registramos abaixo as condições comerciais da venda fechada.",
       validity_days: "0",
-      notes: "Venda sujeita as condicoes comerciais aprovadas.",
+      notes: "Venda sujeita às condições comerciais aprovadas.",
       payment_terms: "Conforme negociado no pedido.",
       delivery_terms: "Prazo conforme cronograma informado ao cliente.",
-      warranty: "Garantia conforme politica comercial vigente.",
-      signature: "{{empresa_responsavel}}\n{{empresa_responsavel_cargo}}",
+      warranty: "Garantia conforme política comercial vigente.",
+      signature: "Representante: {{empresa_responsavel}}\n{{empresa_responsavel_cargo}}",
       contact_details: "{{empresa_telefone}} | {{empresa_email}}",
-      final_message: "Em caso de duvidas, nossa equipe comercial esta a disposicao.",
+      final_message: "Em caso de dúvidas, nossa equipe comercial está à disposição.",
+      pdf_template_name: "",
+      pdf_template_data_url: "",
+      pdf_template_updated_at: "",
       body_html: `
         <section>
           <h2>{{documento_titulo}}</h2>
           <p>{{texto_apresentacao}}</p>
           <p><strong>Cliente:</strong> {{cliente_nome}}</p>
           <p><strong>Documento:</strong> {{cliente_documento}}</p>
-          <p><strong>Endereco:</strong> {{cliente_endereco}}</p>
-          <p><strong>Numero da venda:</strong> {{numero_documento}}</p>
+          <p><strong>Endereço:</strong> {{cliente_endereco}}</p>
+          <p><strong>Número da venda:</strong> {{numero_documento}}</p>
           {{itens}}
-          <p><strong>Condicoes comerciais:</strong> {{condicoes_pagamento}}</p>
+          <p><strong>Condições comerciais:</strong> {{condicoes_pagamento}}</p>
+          <p><strong>Data de entrega:</strong> {{data_entrega}}</p>
           <p><strong>Total:</strong> {{valor_total}}</p>
-          <p><strong>Observacoes:</strong> {{observacoes}}</p>
+          <p><strong>Observações:</strong> {{observacoes}}</p>
         </section>
       `.trim(),
     },
     contract: {
       type: "contract",
-      name: "Modelo Padrao de Contrato",
+      name: "Modelo Padrão de Contrato",
       title: "Contrato Comercial",
       header: "As partes abaixo identificadas firmam o presente instrumento comercial.",
-      footer: "Contrato emitido com base nas condicoes registradas no ERP.",
-      presentation_text: "Instrumento padrao para formalizacao contratual com o cliente.",
+      footer: "Contrato emitido com base nas condições registradas no ERP.",
+      presentation_text: "Instrumento padrão para formalização contratual com o cliente.",
       validity_days: "0",
-      notes: "As clausulas podem ser ajustadas conforme a negociacao.",
+      notes: "As cláusulas podem ser ajustadas conforme a negociação.",
       payment_terms: "Pagamento conforme cronograma aprovado.",
       delivery_terms: "Entrega conforme pedido e cronograma comercial.",
-      warranty: "Garantia conforme condicoes negociadas.",
+      warranty: "Garantia conforme condições negociadas.",
       signature: "{{empresa_responsavel}}\n{{empresa_responsavel_cargo}}",
       contact_details: "{{empresa_email}}",
-      final_message: "Ambas as partes declaram estar de acordo com as clausulas acima.",
+      final_message: "Ambas as partes declaram estar de acordo com as cláusulas acima.",
+      pdf_template_name: "",
+      pdf_template_data_url: "",
+      pdf_template_updated_at: "",
       body_html: `
         <section>
           <h2>{{documento_titulo}}</h2>
           <p>{{texto_apresentacao}}</p>
           <p><strong>Contratante:</strong> {{empresa_nome}}</p>
+          <p><strong>CNPJ da contratante:</strong> {{empresa_cnpj}}</p>
           <p><strong>Contratado:</strong> {{cliente_nome}}</p>
-          <p><strong>Documento do cliente:</strong> {{cliente_documento}}</p>
-          <p><strong>Endereco do cliente:</strong> {{cliente_endereco}}</p>
+          <p><strong>CNPJ do cliente:</strong> {{cliente_cnpj}}</p>
+          <p><strong>Endereço do cliente:</strong> {{cliente_endereco}}</p>
           <p><strong>Valor do contrato:</strong> {{valor_total}}</p>
-          <p><strong>Produtos/servicos:</strong></p>
+          <p><strong>Produtos/serviços:</strong></p>
           {{itens}}
-          <p><strong>Condicoes de pagamento:</strong> {{condicoes_pagamento}}</p>
+          <p><strong>Condições de pagamento:</strong> {{condicoes_pagamento}}</p>
           <p><strong>Prazo:</strong> {{prazo_entrega}}</p>
-          <p><strong>Clausulas adicionais:</strong> {{observacoes}}</p>
+          <p><strong>Data de entrega:</strong> {{data_entrega}}</p>
+          <p><strong>Cláusulas adicionais:</strong> {{observacoes}}</p>
         </section>
       `.trim(),
     },
@@ -7588,6 +8699,8 @@ function createEmptySalesDocumentPreview() {
     customerName: "",
     customerEmail: "",
     customerPhone: "",
+    templatePdfDataUrl: "",
+    templatePdfName: "",
   };
 }
 
@@ -7607,9 +8720,34 @@ function loadSalesDocumentSettings() {
   }
 }
 
+function buildSalesDocumentSettingsCache(settings) {
+  const normalized = normalizeSalesDocumentSettings(settings);
+
+  return {
+    ...normalized,
+    templates: {
+      quote: {
+        ...normalized.templates.quote,
+        pdf_template_data_url: "",
+      },
+      sale: {
+        ...normalized.templates.sale,
+        pdf_template_data_url: "",
+      },
+      contract: {
+        ...normalized.templates.contract,
+        pdf_template_data_url: "",
+      },
+    },
+  };
+}
+
 function saveSalesDocumentSettings() {
   state.salesDocumentSettings.activeTab = state.salesConfigTab;
-  localStorage.setItem(SALES_DOCUMENT_SETTINGS_STORAGE_KEY, JSON.stringify(state.salesDocumentSettings));
+  localStorage.setItem(
+    SALES_DOCUMENT_SETTINGS_STORAGE_KEY,
+    JSON.stringify(buildSalesDocumentSettingsCache(state.salesDocumentSettings)),
+  );
   renderAuthBranding();
 }
 
@@ -7634,6 +8772,13 @@ async function loadSalesDocumentSettingsFromServer() {
   }
 }
 
+async function loadRuntimeSettingsFromServer() {
+  await Promise.all([
+    loadSalesDocumentSettingsFromServer(),
+    loadProductionOperationSettingsFromServer(),
+  ]);
+}
+
 async function persistSalesDocumentSettings() {
   saveSalesDocumentSettings();
 
@@ -7649,11 +8794,16 @@ async function persistSalesDocumentSettings() {
 function normalizeSalesDocumentSettings(settings) {
   const defaults = createDefaultSalesDocumentSettings();
   const source = typeof settings === "object" && settings !== null ? settings : {};
-  return {
+  const normalized = {
     activeTab: source.activeTab || defaults.activeTab,
     company: {
       ...defaults.company,
       ...(source.company || {}),
+    },
+    commercial: {
+      ...defaults.commercial,
+      ...(source.commercial || {}),
+      pix_discount_percent: normalizePercentInput((source.commercial || {}).pix_discount_percent ?? defaults.commercial.pix_discount_percent),
     },
     numbering: {
       ...defaults.numbering,
@@ -7674,6 +8824,55 @@ function normalizeSalesDocumentSettings(settings) {
       },
     },
   };
+
+  const legacyContractSignature = "{{empresa_responsavel}}\n{{empresa_responsavel_cargo}}";
+  const legacyContractBody = `
+        <section>
+          <h2>{{documento_titulo}}</h2>
+          <p>{{texto_apresentacao}}</p>
+          <p><strong>Contratante:</strong> {{empresa_nome}}</p>
+          <p><strong>Contratado:</strong> {{cliente_nome}}</p>
+          <p><strong>Documento do cliente:</strong> {{cliente_documento}}</p>
+          <p><strong>Endereço do cliente:</strong> {{cliente_endereco}}</p>
+          <p><strong>Valor do contrato:</strong> {{valor_total}}</p>
+          <p><strong>Produtos/serviços:</strong></p>
+          {{itens}}
+          <p><strong>Condições de pagamento:</strong> {{condicoes_pagamento}}</p>
+          <p><strong>Prazo:</strong> {{prazo_entrega}}</p>
+          <p><strong>Cláusulas adicionais:</strong> {{observacoes}}</p>
+        </section>
+      `.trim();
+
+  const previousContractSignature = "{{empresa_nome}}\nCNPJ: {{empresa_cnpj}}\nRepresentante: {{empresa_responsavel}}\n{{empresa_responsavel_cargo}}\n\nCliente: {{cliente_nome}}\nCNPJ: {{cliente_cnpj}}";
+
+  if (
+    normalized.templates.contract.signature === legacyContractSignature
+    || normalized.templates.contract.signature === previousContractSignature
+  ) {
+    normalized.templates.contract.signature = defaults.templates.contract.signature;
+  }
+
+  if (String(normalized.templates.contract.body_html || "").trim() === legacyContractBody) {
+    normalized.templates.contract.body_html = defaults.templates.contract.body_html;
+  }
+
+  return normalized;
+}
+
+function stripMetadataLines(value) {
+  return String(value || "")
+    .split("\n")
+    .filter((line) => !line.startsWith("[meta:"))
+    .join("\n")
+    .trim();
+}
+
+function addDaysToIsoDate(date, days) {
+  if (!date) return "";
+  const parsed = new Date(`${date}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return "";
+  parsed.setDate(parsed.getDate() + Number(days || 0));
+  return parsed.toISOString().slice(0, 10);
 }
 
 function canManageSalesTemplates() {
@@ -7698,9 +8897,11 @@ function getSalesTemplatePlaceholderList(type) {
     "{{cliente_nome}}",
     "{{cliente_cnpj}}",
     "{{cliente_documento}}",
+    "{{cliente_ie}}",
     "{{cliente_endereco}}",
     "{{cliente_email}}",
     "{{cliente_telefone}}",
+    "{{cliente_contato}}",
     "{{data}}",
     "{{numero_documento}}",
     "{{documento_titulo}}",
@@ -7708,10 +8909,13 @@ function getSalesTemplatePlaceholderList(type) {
     "{{itens}}",
     "{{valor_subtotal}}",
     "{{valor_desconto}}",
+    "{{desconto_pix}}",
     "{{valor_total}}",
     "{{forma_pagamento}}",
     "{{condicoes_pagamento}}",
     "{{prazo_entrega}}",
+    "{{data_entrega}}",
+    "{{data_de_entrega}}",
     "{{garantia}}",
     "{{observacoes}}",
     "{{mensagem_final}}",
@@ -7724,6 +8928,30 @@ function getSalesTemplatePlaceholderList(type) {
   }
 
   return base;
+}
+
+function getSalesTemplatePdfSize(dataUrl) {
+  const source = String(dataUrl || "");
+  const marker = ";base64,";
+  const base64Index = source.indexOf(marker);
+  if (base64Index === -1) return 0;
+  const base64 = source.slice(base64Index + marker.length);
+  if (!base64) return 0;
+  const padding = (base64.match(/=+$/) || [""])[0].length;
+  return Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
+}
+
+function openSalesTemplatePdf(dataUrl) {
+  const pdfUrl = String(dataUrl || "").trim();
+  if (!pdfUrl) {
+    showToast("Nenhum PDF foi carregado para este modelo.", "warning");
+    return;
+  }
+
+  const pdfWindow = window.open(pdfUrl, "_blank", "noopener,noreferrer");
+  if (!pdfWindow) {
+    showToast("Não foi possível abrir o PDF do modelo.", "warning");
+  }
 }
 
 function nextSalesDocumentNumber(type, consume = false) {
@@ -7755,6 +8983,7 @@ function getSalesDocumentContext(type, sale) {
   const customer = sale && sale.customer_id
     ? (state.moduleData.customers || []).find((item) => item.id === sale.customer_id)
     : null;
+  const customerMetadata = customer ? getCustomerMetadata(customer) : {};
   const documentNumber = type === "contract"
     ? (sale?.contract_number || nextSalesDocumentNumber("contract"))
     : type === "sale"
@@ -7762,7 +8991,13 @@ function getSalesDocumentContext(type, sale) {
       : (sale?.sale_number || nextSalesDocumentNumber("quote"));
   const validityDays = Number(template.validity_days || 0);
   const baseDate = sale?.sale_date || new Date().toISOString().slice(0, 10);
-  const validityDate = validityDays > 0 ? getDateShiftedIso(baseDate, validityDays) : "";
+  const deliveryDate = sale?.delivery_date || "";
+  const deliveryDateLabel = deliveryDate ? formatDate(deliveryDate) : "Data não informada";
+  const quoteValidityDate = type === "quote" && sale?.delivery_date ? sale.delivery_date : "";
+  const validityDate = quoteValidityDate || (validityDays > 0 ? getDateShiftedIso(baseDate, validityDays) : "");
+  const validityDaysLabel = quoteValidityDate
+    ? Math.max(0, Math.round((new Date(`${quoteValidityDate}T00:00:00`) - new Date(`${baseDate}T00:00:00`)) / 86400000))
+    : validityDays;
   const items = metadata.items?.length ? metadata.items : [
     {
       product_name: "Produto demonstrativo",
@@ -7773,7 +9008,13 @@ function getSalesDocumentContext(type, sale) {
       subtotal: 1500,
     },
   ];
-  const totals = items.length ? calculateSalesTotals(items) : { subtotal: 1500, discount: 0, total: 1500 };
+  const paymentConditions = metadata.paymentConditions?.length
+    ? metadata.paymentConditions
+    : normalizeSalesPaymentConditions([{ method: metadata.paymentMethod || sale?.payment_method || "", amount: metadata.total || metadata.subtotal || 0 }], metadata.total || metadata.subtotal || 0);
+  const totals = items.length
+    ? calculateSalesGrandTotals(items, paymentConditions)
+    : { subtotal: 1500, discount: 0, total: 1500, paymentDiscount: 0, itemDiscount: 0 };
+  const paymentConditionsLabel = getSalesPaymentConditionsLabel(paymentConditions, Math.max(0, totals.subtotal - totals.itemDiscount));
   const sellerName = getLoggedUserName("Equipe Comercial");
 
   return {
@@ -7793,11 +9034,13 @@ function getSalesDocumentContext(type, sale) {
       "{{empresa_responsavel}}": company.responsible_name || sellerName,
       "{{empresa_responsavel_cargo}}": company.responsible_role || "Comercial",
       "{{cliente_nome}}": sale?.customer_name || customer?.name || "Cliente Exemplo",
-      "{{cliente_cnpj}}": sale?.cnpj || customer?.cnpj || "",
-      "{{cliente_documento}}": sale?.cnpj || customer?.cnpj || customer?.cpf || "Documento nao informado",
-      "{{cliente_endereco}}": sale?.address || customer?.address || "Endereco nao informado",
-      "{{cliente_email}}": customer?.email || "cliente@empresa.com",
-      "{{cliente_telefone}}": customer?.phone || "(00) 00000-0000",
+      "{{cliente_cnpj}}": sale?.cnpj || customerMetadata.cnpj || "",
+      "{{cliente_documento}}": sale?.cnpj || customerMetadata.document || "Documento não informado",
+      "{{cliente_ie}}": customerMetadata.state_registration || "",
+      "{{cliente_endereco}}": sale?.address || customerMetadata.address || "Endereço não informado",
+      "{{cliente_email}}": customerMetadata.email || "cliente@empresa.com",
+      "{{cliente_telefone}}": customerMetadata.phone || "(00) 00000-0000",
+      "{{cliente_contato}}": customerMetadata.contact || "",
       "{{data}}": formatDate(baseDate),
       "{{numero_documento}}": documentNumber,
       "{{numero_contrato}}": sale?.contract_number || nextSalesDocumentNumber("contract"),
@@ -7805,39 +9048,63 @@ function getSalesDocumentContext(type, sale) {
       "{{texto_apresentacao}}": template.presentation_text || "",
       "{{valor_subtotal}}": formatCurrency(totals.subtotal),
       "{{valor_desconto}}": formatCurrency(totals.discount),
+      "{{desconto_pix}}": formatCurrency(totals.paymentDiscount || 0),
       "{{valor_total}}": formatCurrency(totals.total),
-      "{{forma_pagamento}}": getPaymentMethodLabel(metadata.paymentMethod || sale?.payment_method || ""),
-      "{{condicoes_pagamento}}": template.payment_terms || "",
+      "{{forma_pagamento}}": paymentConditionsLabel,
+      "{{condicoes_pagamento}}": paymentConditionsLabel || template.payment_terms || "",
       "{{prazo_entrega}}": template.delivery_terms || "",
+      "{{data_entrega}}": deliveryDateLabel,
+      "{{data_de_entrega}}": deliveryDateLabel,
+      "{{data_da_entrega}}": deliveryDateLabel,
       "{{garantia}}": template.warranty || "",
-      "{{observacoes}}": (sale?.contract_notes || template.notes || "").trim(),
+      "{{observacoes}}": (metadata.notes || template.notes || "").trim(),
       "{{mensagem_final}}": template.final_message || "",
-      "{{validade_orcamento}}": validityDate ? `${template.validity_days} dias (${formatDate(validityDate)})` : "Conforme politica comercial",
+      "{{validade_orcamento}}": validityDate ? `Orçamento válido por ${validityDaysLabel} dias, até ${formatDate(validityDate)}.` : "Validade do orçamento conforme política comercial.",
       "{{vendedor_nome}}": sellerName,
     },
   };
 }
 
+function getSalesDocumentItemProductName(item) {
+  const product = (state.moduleData.products || []).find((productItem) =>
+    productItem.id === item.product_id
+    || productItem.code === item.product_code
+    || productItem.name === item.product_name
+  );
+  return product?.name || item.product_name || "-";
+}
+
+function isProductVisibleInCommercialDocuments(product) {
+  return Boolean(product)
+    && product.status !== "inactive"
+    && product.available_for_sale !== false;
+}
+
 function renderSalesDocumentItemsTable(items) {
-  const rows = items.map((item) => `
-    <tr>
-      <td>${escapeHtml(item.product_name || "-")}</td>
-      <td>${escapeHtml(item.product_code || "-")}</td>
-      <td>${formatQuantity(item.quantity || 0)}</td>
-      <td>${formatCurrency(item.unit_price || 0)}</td>
-      <td>${formatCurrency(item.discount || 0)}</td>
-      <td>${formatCurrency(item.subtotal || 0)}</td>
-    </tr>
-  `).join("");
+  const rows = items.map((item) => {
+    return `
+      <tr>
+        <td>
+          <strong>${escapeHtml(getSalesDocumentItemProductName(item))}</strong>
+          ${item.sale_option_label ? `<div class="table-inline-copy">${escapeHtml(item.sale_option_label)}</div>` : ""}
+        </td>
+        <td>${escapeHtml(item.product_code || "-")}</td>
+        <td class="is-centered">${formatWholeQuantity(item.quantity || 0)}</td>
+        <td class="is-right">${formatCurrency(item.unit_price || 0)}</td>
+        <td class="is-right">${formatCurrency(item.discount || 0)}</td>
+        <td class="is-right">${formatCurrency(item.subtotal || 0)}</td>
+      </tr>
+    `;
+  }).join("");
 
   return `
     <table class="sales-document-items-table">
       <thead>
         <tr>
-          <th>Item</th>
-          <th>Codigo</th>
+          <th>Discriminação</th>
+          <th>Código</th>
           <th>Quantidade</th>
-          <th>Unitario</th>
+          <th>Unitário</th>
           <th>Desconto</th>
           <th>Total</th>
         </tr>
@@ -7847,60 +9114,342 @@ function renderSalesDocumentItemsTable(items) {
   `;
 }
 
+function renderSalesDocumentHeaderBlock(context) {
+  const logoHtml = context.company.logo
+    ? `<img class="sales-print-logo" src="${context.company.logo}" alt="Logo ${escapeHtml(context.company.company_name || "empresa")}" />`
+    : `<div class="sales-print-logo-placeholder">${escapeHtml((context.company.company_name || "Empresa").slice(0, 2).toUpperCase())}</div>`;
+
+  return `
+    <header class="sales-print-header">
+      <div class="sales-print-logo-box">
+        ${logoHtml}
+      </div>
+      <div class="sales-print-company">
+        <span class="sales-print-company-name">${escapeHtml(context.company.company_name || "Empresa")}</span>
+        <span>${escapeHtml(context.company.cnpj || "")}</span>
+        <span>${escapeHtml(context.company.address || "")}</span>
+        <span>${escapeHtml(context.company.phone || "")}</span>
+        <span>${escapeHtml(context.company.email || "")}</span>
+      </div>
+    </header>
+  `;
+}
+
+function renderSalesDocumentMetaBlock(type, context) {
+  const numberLabel = type === "contract"
+    ? "Número do contrato"
+    : type === "sale"
+      ? "Número da venda"
+      : "Número do orçamento";
+
+  return `
+    <section class="sales-print-meta">
+      <div class="sales-print-meta-item">
+        <span class="sales-print-meta-label">Cliente</span>
+        <strong>${escapeHtml(context.values["{{cliente_nome}}"])}</strong>
+      </div>
+      <div class="sales-print-meta-item">
+        <span class="sales-print-meta-label">CNPJ do cliente</span>
+        <strong>${escapeHtml(context.values["{{cliente_cnpj}}"] || "-")}</strong>
+      </div>
+      <div class="sales-print-meta-item">
+        <span class="sales-print-meta-label">Data</span>
+        <strong>${escapeHtml(context.values["{{data}}"])}</strong>
+      </div>
+      <div class="sales-print-meta-item">
+        <span class="sales-print-meta-label">${numberLabel}</span>
+        <strong>${escapeHtml(context.values["{{numero_documento}}"])}</strong>
+      </div>
+    </section>
+  `;
+}
+
+function renderSalesDocumentSummaryBlock(context) {
+  return `
+    <aside class="sales-print-summary">
+      <div class="sales-print-summary-row">
+        <span>Subtotal</span>
+        <strong>${escapeHtml(context.values["{{valor_subtotal}}"])}</strong>
+      </div>
+      <div class="sales-print-summary-row">
+        <span>Desconto</span>
+        <strong>${escapeHtml(context.values["{{valor_desconto}}"])}</strong>
+      </div>
+      <div class="sales-print-summary-row sales-print-summary-total">
+        <span>Total</span>
+        <strong>${escapeHtml(context.values["{{valor_total}}"])}</strong>
+      </div>
+    </aside>
+  `;
+}
+
+function renderSalesDocumentContactBlock(context, template) {
+  const contactText = [
+    context.company.phone ? `WhatsApp: ${context.company.phone}` : "",
+    context.company.email ? `Email: ${context.company.email}` : "",
+    context.company.site ? `Site: ${context.company.site}` : "",
+  ].filter(Boolean).join(" | ");
+
+  return `
+    <section class="sales-print-contact">
+      <strong>Contato</strong>
+      <div>${escapeHtml(interpolateSalesDocumentTemplate(template.contact_details || contactText, context))}</div>
+    </section>
+  `;
+}
+
+function renderSalesDocumentFooterBlock(context, template) {
+  return `
+    <footer class="sales-print-footer">
+      <p>${escapeHtml(interpolateSalesDocumentTemplate(template.footer, context))}</p>
+    </footer>
+  `;
+}
+
+function normalizeSalesPlaceholderKey(value) {
+  return String(value || "")
+    .replace(/[{}]/g, "")
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function interpolateSalesDocumentTemplate(content, context, extraValues = {}) {
+  const values = {
+    ...context.values,
+    ...extraValues,
+  };
+  const normalizedValues = new Map(
+    Object.entries(values).map(([key, value]) => [normalizeSalesPlaceholderKey(key), value])
+  );
+
+  return String(content || "").replace(/\{\{\s*([^}]+?)\s*\}\}/g, (match, key) => {
+    const normalizedKey = normalizeSalesPlaceholderKey(key);
+    if (!normalizedValues.has(normalizedKey)) {
+      return match;
+    }
+    return String(normalizedValues.get(normalizedKey) ?? "");
+  });
+}
+
+function renderSalesContractDocument(context, template, itemsTableHtml, interpolate) {
+  const companyName = escapeHtml(context.values["{{empresa_nome}}"]);
+  const companyDocument = escapeHtml(context.values["{{empresa_cnpj}}"] || "-");
+  const companyAddress = escapeHtml(context.values["{{empresa_endereco}}"] || "Endereço não informado");
+  const customerName = escapeHtml(context.values["{{cliente_nome}}"]);
+  const customerDocument = escapeHtml(context.values["{{cliente_cnpj}}"] || context.values["{{cliente_documento}}"] || "-");
+  const customerAddress = escapeHtml(context.values["{{cliente_endereco}}"] || "Endereço não informado");
+  const contractDateLocation = `São Gonçalo do Sapucaí - MG, ${context.values["{{data}}"]}`;
+  const introHtml = `
+    <p>
+      Pelo presente instrumento particular de contratação para fabricação, venda e compra de máquinas e equipamentos, de um lado
+      <strong>${companyName}</strong>, pessoa jurídica de direito privado, constituída como sociedade empresária limitada,
+      inscrita no CNPJ sob o nº <strong>${companyDocument}</strong>, com endereço em
+      <strong>${companyAddress}</strong>, neste ato representada por seu administrador, doravante denominada <strong>FABRICANTE</strong>;
+      e, de outro lado, <strong>${customerName}</strong>, pessoa jurídica inscrita no CNPJ sob o nº <strong>${customerDocument}</strong>,
+      estabelecida em <strong>${customerAddress}</strong>, doravante denominada <strong>CLIENTE</strong>, tem entre si justo e contratado o que segue.
+    </p>
+    <p><strong>Objeto:</strong></p>
+  `.trim();
+  const financialDetailsHtml = [
+    context.values["{{condicoes_pagamento}}"] ? `<p><strong>Preço e Pagamento:</strong><br>${escapeHtml(context.values["{{condicoes_pagamento}}"])}</p>` : "",
+    `<p><strong>Total:</strong> ${escapeHtml(context.values["{{valor_total}}"])}</p>`,
+    context.values["{{prazo_entrega}}"] ? `<p><strong>Prazo de entrega:</strong> ${escapeHtml(context.values["{{prazo_entrega}}"])}</p>` : "",
+    context.values["{{data_entrega}}"] ? `<p><strong>Data de entrega:</strong> ${escapeHtml(context.values["{{data_entrega}}"])}</p>` : "",
+    context.values["{{observacoes}}"] ? `<p><strong>Outras informações:</strong><br>${escapeHtml(context.values["{{observacoes}}"])}</p>` : "",
+  ].filter(Boolean).join("");
+  const summaryHtml = `
+    <aside class="summary">
+      <div class="summary-row">
+        <span>Subtotal</span>
+        <strong>${escapeHtml(context.values["{{valor_subtotal}}"])}</strong>
+      </div>
+      <div class="summary-row">
+        <span>Desconto</span>
+        <strong>${escapeHtml(context.values["{{valor_desconto}}"])}</strong>
+      </div>
+      <div class="summary-row total">
+        <span>Total</span>
+        <strong>${escapeHtml(context.values["{{valor_total}}"])}</strong>
+      </div>
+    </aside>
+  `;
+  const pageOneLegalHtml = [
+    context.values["{{garantia}}"] ? `<p><strong>Garantias:</strong><br>${escapeHtmlWithLineBreaks(context.values["{{garantia}}"])}</p>` : "",
+  ].filter(Boolean).join("");
+  const declarationsHtml = `<p><strong>Declarações:</strong><br>${companyName} declara conhecer plenamente os requisitos de qualidade necessários para a confecção de equipamentos destinados à indústria farmacêutica, bem como as normas nacionais e internas aplicáveis.</p>`;
+  const rescissionHtml = `<p><strong>Rescisão contratual com multa:</strong><br>Em caso de rescisão sem justa causa por parte do CLIENTE, este pagará à FABRICANTE a quantia correspondente a 20% do valor total do contrato.</p>`;
+  const approvalHtml = context.values["{{mensagem_final}}"]
+    ? `<p><strong>Aprovação:</strong><br>${escapeHtml(context.values["{{mensagem_final}}"])}</p>`
+    : "";
+  const contractDateHtml = `<p><strong>${escapeHtml(contractDateLocation)}</strong></p>`;
+
+  return `
+    <article class="sales-document-sheet sales-document-sheet-contract sales-contract-document">
+      <div class="document">
+        <section class="print-page page-1">
+          <header class="header">
+            <div class="header-logo">
+            ${context.company.logo
+              ? `<img src="${context.company.logo}" alt="Logo ${escapeHtml(context.company.company_name || "empresa")}" />`
+              : `<div class="header-logo-placeholder">${escapeHtml((context.company.company_name || "Empresa").slice(0, 2).toUpperCase())}</div>`}
+            </div>
+            <div class="header-company">
+              <h1>${escapeHtml(context.company.company_name || "Empresa")}</h1>
+              <p>${escapeHtml(context.company.cnpj || "")}</p>
+              <p>${escapeHtml(context.company.address || "")}</p>
+              <p>${escapeHtml(context.company.phone || "")}</p>
+              <p>${escapeHtml(context.company.email || "")}</p>
+            </div>
+          </header>
+
+          <section class="contract-meta">
+            <div class="meta-col">
+              <div class="meta-group">
+                <span class="meta-label">Cliente</span>
+                <strong>${customerName}</strong>
+              </div>
+              <div class="meta-group">
+                <span class="meta-label">Data</span>
+                <strong>${escapeHtml(context.values["{{data}}"])}</strong>
+              </div>
+            </div>
+
+            <div class="meta-col">
+              <div class="meta-group">
+                <span class="meta-label">CNPJ do cliente</span>
+                <strong>${customerDocument}</strong>
+              </div>
+              <div class="meta-group">
+                <span class="meta-label">Número do contrato</span>
+                <strong>${escapeHtml(context.values["{{numero_documento}}"])}</strong>
+              </div>
+            </div>
+          </section>
+
+          <section class="title-band">
+            ${escapeHtml(interpolate(template.header || template.title || "CONTRATO"))}
+          </section>
+
+          <section class="contract-intro">
+            ${introHtml}
+          </section>
+
+          <section class="contract-items">
+            <div class="table-wrap">
+              ${itemsTableHtml}
+            </div>
+          </section>
+
+          <section class="financial-block">
+            <div class="financial-text">
+              ${financialDetailsHtml}
+            </div>
+            ${summaryHtml}
+          </section>
+
+          ${pageOneLegalHtml
+            ? `<section class="contract-legal contract-legal-page-1">
+            ${pageOneLegalHtml}
+          </section>`
+            : ""}
+
+        </section>
+
+        <section class="print-page page-2">
+          <section class="contract-legal">
+            ${declarationsHtml}
+          </section>
+
+          <section class="contract-legal">
+            ${rescissionHtml}
+          </section>
+
+          <section class="contract-approval">
+            ${approvalHtml}
+          </section>
+
+          <section class="contract-approval">
+            ${contractDateHtml}
+          </section>
+
+          <section class="signatures">
+            <div class="signature-box">
+              <div class="signature-line"></div>
+              <div class="signature-name">${companyName}</div>
+              <div class="signature-doc">CNPJ: ${companyDocument}</div>
+            </div>
+
+            <div class="signature-box">
+              <div class="signature-line"></div>
+              <div class="signature-name">${customerName}</div>
+              <div class="signature-doc">CNPJ: ${customerDocument}</div>
+            </div>
+          </section>
+
+          <footer class="contact">
+            <strong>Contato</strong>
+            <p>${escapeHtml(interpolate(template.contact_details || `${context.company.phone || ""} | ${context.company.email || ""} | ${context.company.site || ""}`))}</p>
+          </footer>
+        </section>
+      </div>
+    </article>
+  `.trim();
+}
+
 function resolveSalesTemplateContent(type, sale) {
   const context = getSalesDocumentContext(type, sale);
   const template = context.template;
-  const values = {
-    ...context.values,
-    "{{itens}}": renderSalesDocumentItemsTable(context.items),
-  };
+  const itemsTableHtml = renderSalesDocumentItemsTable(context.items);
+  const interpolate = (content, extraValues = {}) => interpolateSalesDocumentTemplate(content, context, {
+    "{{itens}}": itemsTableHtml,
+    ...extraValues,
+  });
 
-  const interpolate = (content) => Object.entries(values).reduce((result, [key, value]) => {
-    return result.split(key).join(String(value ?? ""));
-  }, String(content || ""));
+  const blockSections = [
+    context.values["{{texto_apresentacao}}"] ? `<section class="sales-print-block"><p>${escapeHtml(context.values["{{texto_apresentacao}}"])}</p></section>` : "",
+    `<section class="sales-print-table-wrap">${itemsTableHtml}</section>`,
+    renderSalesDocumentSummaryBlock(context),
+    context.values["{{condicoes_pagamento}}"] ? `<section class="sales-print-block"><p><strong>Pagamento:</strong><br>${escapeHtmlWithLineBreaks(context.values["{{condicoes_pagamento}}"])}</p></section>` : "",
+    context.values["{{prazo_entrega}}"] ? `<section class="sales-print-block"><p><strong>Prazo de entrega:</strong> ${escapeHtml(context.values["{{prazo_entrega}}"])}</p></section>` : "",
+    type !== "quote" && context.values["{{data_entrega}}"] ? `<section class="sales-print-block"><p><strong>Data de entrega:</strong> ${escapeHtml(context.values["{{data_entrega}}"])}</p></section>` : "",
+    type === "quote" && context.values["{{validade_orcamento}}"] ? `<section class="sales-print-block"><p><strong>Validade do orçamento:</strong> ${escapeHtml(context.values["{{validade_orcamento}}"])}</p></section>` : "",
+    context.values["{{garantia}}"] ? `<section class="sales-print-block"><p><strong>Garantia:</strong><br>${escapeHtmlWithLineBreaks(context.values["{{garantia}}"])}</p></section>` : "",
+    context.values["{{observacoes}}"] ? `<section class="sales-print-block"><p><strong>Observações:</strong> ${escapeHtml(context.values["{{observacoes}}"])}</p></section>` : "",
+  ].filter(Boolean).join("");
 
-  const logoHtml = context.company.logo
-    ? `<img class="sales-document-logo" src="${context.company.logo}" alt="Logo ${escapeHtml(context.company.company_name || "empresa")}" />`
-    : `<div class="sales-document-logo-placeholder">${escapeHtml((context.company.company_name || "Empresa").slice(0, 2).toUpperCase())}</div>`;
+  if (type !== "contract") {
+    const html = `
+      <article class="sales-document-sheet sales-document-sheet-${type}">
+        <div class="sales-print-shell">
+          ${renderSalesDocumentHeaderBlock(context)}
+          ${renderSalesDocumentMetaBlock(type, context)}
+          <section class="sales-print-band">
+            ${escapeHtml(interpolate(template.header))}
+          </section>
+          ${blockSections}
+          ${renderSalesDocumentContactBlock(context, template)}
+          ${renderSalesDocumentFooterBlock(context, template)}
+        </div>
+      </article>
+    `.trim();
 
-  const html = `
-    <article class="sales-document-sheet sales-document-sheet-${type}">
-      <header class="sales-document-header">
-        <div class="sales-document-brand">
-          ${logoHtml}
-          <div>
-            <strong>${escapeHtml(context.company.company_name || "Empresa")}</strong>
-            <p>${escapeHtml(context.company.cnpj || "")}</p>
-            <p>${escapeHtml(context.company.address || "")}</p>
-          </div>
-        </div>
-        <div class="sales-document-meta">
-          <span>${escapeHtml(template.title || "")}</span>
-          <strong>${escapeHtml(context.values["{{numero_documento}}"])}</strong>
-          <p>${escapeHtml(context.values["{{data}}"])}</p>
-        </div>
-      </header>
-      <section class="sales-document-banner">
-        <p>${interpolate(template.header)}</p>
-      </section>
-      <section class="sales-document-body">
-        ${interpolate(template.body_html)}
-      </section>
-      <section class="sales-document-closing">
-        <div>
-          <h4>Contato</h4>
-          <p>${interpolate(template.contact_details)}</p>
-        </div>
-        <div>
-          <h4>Assinatura</h4>
-          <p>${interpolate(template.signature).replace(/\n/g, "<br />")}</p>
-        </div>
-      </section>
-      <footer class="sales-document-footer">
-        <p>${interpolate(template.footer)}</p>
-      </footer>
-    </article>
-  `.trim();
+    return {
+      html,
+      customerName: context.values["{{cliente_nome}}"],
+      customerEmail: context.values["{{cliente_email}}"],
+      customerPhone: context.values["{{cliente_telefone}}"],
+      title: template.title || "",
+      documentNumber: context.values["{{numero_documento}}"],
+      templatePdfDataUrl: template.pdf_template_data_url || "",
+      templatePdfName: template.pdf_template_name || "",
+    };
+  }
+
+  const html = renderSalesContractDocument(context, template, itemsTableHtml, interpolate);
 
   return {
     html,
@@ -7909,11 +9458,47 @@ function resolveSalesTemplateContent(type, sale) {
     customerPhone: context.values["{{cliente_telefone}}"],
     title: template.title || "",
     documentNumber: context.values["{{numero_documento}}"],
+    templatePdfDataUrl: template.pdf_template_data_url || "",
+    templatePdfName: template.pdf_template_name || "",
+  };
+}
+
+function buildSalesDraftPreviewRecord(type) {
+  if (state.openAccordionKey !== "sales-form") {
+    return null;
+  }
+
+  const items = normalizeSalesItems(state.salesDraft.items || []);
+  const itemTotals = calculateSalesTotals(items);
+  const paymentConditions = normalizeSalesPaymentConditions(state.salesDraft.payment_conditions || [], itemTotals.total);
+  const totals = calculateSalesGrandTotals(items, paymentConditions);
+  return {
+    id: "",
+    customer_id: state.salesDraft.customer_id || null,
+    customer_name: state.salesDraft.customer_name || "",
+    cnpj: state.salesDraft.cnpj || "",
+    address: state.salesDraft.address || "",
+    invoice_number: state.salesDraft.invoice_number || "",
+    contract_number: state.salesDraft.contract_number || "",
+    contract_notes: [
+      state.salesDraft.contract_notes || "",
+      paymentConditions.length ? `[meta:payment_conditions]${JSON.stringify(paymentConditions)}` : "",
+    ].filter(Boolean).join("\n"),
+    sale_date: state.salesDraft.sale_date || new Date().toISOString().slice(0, 10),
+    delivery_date: state.salesDraft.delivery_date || "",
+    payment_method: paymentConditions[0]?.method || state.salesDraft.payment_method || "",
+    status: type === "sale" ? "finalized" : "quote",
+    sale_items: items,
+    subtotal_amount: totals.subtotal,
+    discount_amount: totals.discount,
+    total_amount: totals.total,
   };
 }
 
 function openSalesDocumentPreview(type, saleId = "") {
-  const sale = saleId ? (state.moduleData.sales || []).find((item) => item.id === saleId) : null;
+  const sale = saleId
+    ? (state.moduleData.sales || []).find((item) => item.id === saleId)
+    : buildSalesDraftPreviewRecord(type);
   const preview = resolveSalesTemplateContent(type, sale);
   state.salesDocumentPreview = {
     open: true,
@@ -7924,13 +9509,15 @@ function openSalesDocumentPreview(type, saleId = "") {
     customerName: preview.customerName,
     customerEmail: preview.customerEmail,
     customerPhone: preview.customerPhone,
+    templatePdfDataUrl: preview.templatePdfDataUrl,
+    templatePdfName: preview.templatePdfName,
   };
   void queueSystemLog({
     moduleKey: "sales",
     action: "geracao_pdf",
     level: "Informativo",
     itemAffected: sale?.sale_number || sale?.id || type,
-    description: `Pre-visualizacao de documento comercial do tipo ${type}.`,
+    description: `Pré-visualização de documento comercial do tipo ${type}.`,
     entityType: "sales_document",
     entityId: sale?.id || null,
     payload: { type, sale_id: sale?.id || null },
@@ -7945,7 +9532,7 @@ function closeSalesDocumentPreview() {
 function openPrintWindowForHtml(html, title) {
   const printWindow = window.open("", "_blank", "width=1100,height=800");
   if (!printWindow) {
-    showToast("Nao foi possivel abrir a visualizacao de impressao.", "warning");
+    showToast("Não foi possível abrir a visualização de impressão.", "warning");
     return;
   }
 
@@ -7955,17 +9542,135 @@ function openPrintWindowForHtml(html, title) {
         <title>${escapeHtml(title || "Documento Comercial")}</title>
         <meta charset="utf-8" />
         <style>
-          body { margin: 0; padding: 24px; background: #eef2f7; font-family: "Segoe UI", sans-serif; }
-          .sales-document-sheet { max-width: 960px; margin: 0 auto; background: #fff; padding: 32px; color: #0f172a; }
-          .sales-document-header, .sales-document-closing { display: flex; justify-content: space-between; gap: 24px; }
-          .sales-document-brand { display: flex; gap: 16px; align-items: center; }
-          .sales-document-logo { width: 72px; height: 72px; object-fit: cover; border-radius: 18px; }
-          .sales-document-logo-placeholder { width: 72px; height: 72px; border-radius: 18px; display: grid; place-items: center; background: #dbeafe; font-weight: 700; }
-          .sales-document-banner { margin: 24px 0; padding: 16px 18px; border-radius: 16px; background: #f8fafc; }
-          .sales-document-items-table { width: 100%; border-collapse: collapse; margin: 20px 0; }
-          .sales-document-items-table th, .sales-document-items-table td { border-bottom: 1px solid #e2e8f0; padding: 10px 8px; text-align: left; }
-          .sales-document-footer { margin-top: 24px; padding-top: 16px; border-top: 1px solid #cbd5e1; color: #475569; }
-          @media print { body { background: #fff; padding: 0; } .sales-document-sheet { padding: 0; } }
+          :root { --brand-blue: #003c96; --line: #dbe5f0; --ink: #0f172a; --muted: #64748b; --bg: #eef2f7; }
+          * { box-sizing: border-box; }
+          html, body { margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; color: var(--ink); background: var(--bg); }
+          body { padding: 20px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          .sales-document-sheet { width: 210mm; max-width: 210mm; min-height: 297mm; margin: 0 auto; background: #fff; padding: 12mm; box-shadow: 0 18px 40px rgba(15, 23, 42, 0.12); overflow: hidden; }
+          .sales-print-shell { width: 100%; }
+          .sales-print-header { display: flex; align-items: flex-start; flex-direction: row; justify-content: flex-start; flex-wrap: nowrap; gap: 18px; margin-bottom: 12px; }
+          .sales-print-logo-box { flex: 0 0 220px; min-width: 220px; display: flex; align-items: flex-start; justify-content: flex-start; }
+          .sales-print-logo, .sales-print-logo-placeholder { width: 100%; max-width: 220px; height: 74px; display: block; }
+          .sales-print-logo { object-fit: contain; background: #fff; border: 1px solid #dbe5f0; border-radius: 18px; padding: 8px 12px; }
+          .sales-print-logo-placeholder { display: grid; place-items: center; background: #e2e8f0; color: #1e293b; font-size: 24px; font-weight: 700; }
+          .sales-print-company { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+          .sales-print-company-name { font-size: 19px; font-weight: 700; line-height: 1.2; color: #111827; }
+          .sales-print-company span { font-size: 12px; line-height: 1.35; }
+          .sales-print-meta { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: repeat(2, auto); grid-auto-flow: column; gap: 12px 40px; margin-top: 10px; padding-top: 10px; border-top: 1px solid #e5e7eb; }
+          .sales-print-meta-item { padding: 2px 0; }
+          .sales-print-meta-label { display: block; font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+          .sales-print-meta-item strong { font-size: 13px; color: #111827; }
+          .sales-print-band { margin-top: 14px; padding: 10px 14px; border-radius: 10px; background: var(--brand-blue); color: #fff; text-align: center; font-size: 13px; font-weight: 700; line-height: 1.4; }
+          .sales-print-block { margin-top: 10px; font-size: 12px; line-height: 1.5; color: #1f2937; }
+          .sales-print-block p, .sales-print-footer p { margin: 0; }
+          .sales-print-table-wrap { margin-top: 12px; }
+          .sales-document-items-table { width: 100%; border-collapse: separate; border-spacing: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin-top: 12px; }
+          .sales-document-items-table thead th { background: var(--brand-blue); color: #fff; font-size: 11px; text-align: left; padding: 9px 10px; line-height: 1.2; }
+          .sales-document-items-table tbody td { font-size: 11px; padding: 9px 10px; border-bottom: 1px solid #e5edf6; line-height: 1.3; }
+          .sales-document-items-table tbody tr:nth-child(even) td { background: #f8fbff; }
+          .sales-document-items-table tbody tr:last-child td { border-bottom: none; }
+          .sales-document-items-table .is-centered { text-align: center; }
+          .sales-document-items-table .is-right { text-align: right; }
+          .sales-print-summary { width: 280px; margin: 10px 0 0 auto; display: flex; flex-direction: column; gap: 6px; }
+          .sales-print-summary-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 11px; background: #fff; }
+          .sales-print-summary-total { color: var(--brand-blue); font-weight: 700; font-size: 13px; }
+          .sales-print-contact { margin-top: 14px; text-align: center; }
+          .sales-print-contact strong { display: block; font-size: 13px; margin-bottom: 5px; }
+          .sales-print-contact div { font-size: 11px; line-height: 1.5; }
+          .sales-print-signatures { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 36px; margin-top: 24px; align-items: start; }
+          .sales-print-signature-card { display: flex; flex-direction: column; align-items: center; text-align: center; font-size: 11px; line-height: 1.5; }
+          .sales-print-signature-line { display: block; width: 100%; margin: 0 0 8px; border-top: 1px solid #0f172a; }
+          .sales-print-contract-body { white-space: normal; }
+          .sales-print-contract-body h1, .sales-print-contract-body h2, .sales-print-contract-body h3, .sales-print-contract-body h4 { margin: 0 0 8px; color: #111827; }
+          .sales-print-contract-body p, .sales-print-contract-body li { font-size: 12px; line-height: 1.55; }
+          .sales-print-footer { margin-top: 16px; padding-top: 10px; border-top: 1px solid var(--line); color: #94a3b8; text-align: center; font-size: 10px; line-height: 1.4; }
+          .document { width: 100%; margin: 0; padding: 0; background: #fff; display: grid; gap: 22px; }
+          .print-page { width: 100%; min-height: 0; background: #fff; padding: 12mm; }
+          .header { display: flex; align-items: flex-start; gap: 18px; padding-bottom: 10px; border-bottom: 1px solid #d9e1ea; }
+          .header-logo { width: 220px; flex-shrink: 0; display: flex; justify-content: flex-start; }
+          .header-logo img, .header-logo-placeholder { width: 100%; max-width: 220px; height: 74px; display: block; }
+          .header-logo img { object-fit: contain; background: #fff; border: 1px solid #dbe5f0; border-radius: 18px; padding: 8px 12px; }
+          .header-logo-placeholder { display: grid; place-items: center; background: #e2e8f0; color: #1e293b; font-size: 24px; font-weight: 700; }
+          .header-company { flex: 1; }
+          .header-company h1 { margin: 0 0 6px; font-size: 16px; line-height: 1.2; }
+          .header-company p { margin: 0 0 4px; font-size: 12px; line-height: 1.35; }
+          .contract-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 40px; margin-top: 12px; }
+          .meta-col { display: grid; gap: 10px; }
+          .meta-group { display: grid; gap: 4px; }
+          .meta-label { font-size: 10px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.06em; }
+          .meta-group strong { font-size: 13px; line-height: 1.3; }
+          .title-band { margin-top: 14px; background: #0b4aa8; color: #fff; text-align: center; padding: 12px 18px; border-radius: 10px; font-size: 14px; font-weight: 700; line-height: 1.35; }
+          .contract-intro, .contract-legal, .contract-approval, .financial-text { margin-top: 12px; font-size: 11px; line-height: 1.6; }
+          .contract-intro p, .contract-legal p, .contract-approval p, .financial-text p { margin: 0 0 8px; }
+          .contract-items { margin-top: 12px; }
+          .table-wrap { margin-top: 6px; }
+          .financial-block { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; margin-top: 14px; break-inside: avoid; page-break-inside: avoid; }
+          .summary { width: 280px; display: flex; flex-direction: column; gap: 8px; break-inside: avoid; page-break-inside: avoid; }
+          .summary-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border: 1px solid #d9e1ea; border-radius: 8px; font-size: 11px; }
+          .summary-row.total { color: #0b4aa8; font-size: 13px; font-weight: 700; }
+          .signatures { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 48px; margin-top: 28px; break-inside: avoid; page-break-inside: avoid; }
+          .signature-box { width: 100%; text-align: center; break-inside: avoid; page-break-inside: avoid; min-height: 132px; display: flex; flex-direction: column; justify-content: flex-end; }
+          .signature-line { border-top: 1px solid #1f2937; margin-bottom: 12px; min-height: 72px; }
+          .signature-name { font-size: 12px; font-weight: 700; }
+          .signature-doc { margin-top: 3px; font-size: 11px; }
+          .contact { margin-top: 22px; padding-top: 10px; border-top: 1px solid #d9e1ea; text-align: center; }
+          .contact strong { display: block; font-size: 13px; margin-bottom: 4px; }
+          .contact p { margin: 0; font-size: 11px; line-height: 1.5; }
+          @page { size: A4; margin: 10mm; }
+          @media print {
+            html, body { width: 100%; min-height: 100%; margin: 0; padding: 0; background: #fff; }
+            body { padding: 0; }
+            .sales-document-sheet { width: 100%; max-width: none; min-height: auto; margin: 0; padding: 0; box-shadow: none; overflow: visible; }
+            .document { display: block; gap: 0; }
+            .print-page { box-sizing: border-box; width: 100%; min-height: 0; break-after: page; page-break-after: always; }
+            .print-page { background: #fff; padding: 6mm 7mm; box-shadow: none; }
+            .print-page:last-child { break-after: auto; page-break-after: auto; }
+            .contract-meta,
+            .contract-items,
+            .financial-block,
+            .summary,
+            .signatures,
+            .signature-box,
+            table,
+            tr,
+            td,
+            th { break-inside: avoid; page-break-inside: avoid; }
+            thead { display: table-header-group; }
+            tfoot { display: table-footer-group; }
+            .contract-meta { grid-template-columns: 1fr 1fr !important; }
+            .signatures { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+            .header { gap: 12px; padding-bottom: 6px; }
+            .header-logo { width: 168px; }
+            .header-logo img, .header-logo-placeholder { max-width: 168px; height: 58px; }
+            .header-company h1 { margin: 0 0 3px; font-size: 14px; }
+            .header-company p { margin: 0 0 2px; font-size: 10px; line-height: 1.2; }
+            .contract-meta { gap: 8px 20px; margin-top: 8px; }
+            .meta-col { gap: 6px; }
+            .meta-label { font-size: 9px; }
+            .meta-group strong { font-size: 11px; line-height: 1.15; }
+            .title-band { margin-top: 8px; padding: 8px 11px; font-size: 12.5px; line-height: 1.2; }
+            .contract-intro, .contract-legal, .contract-approval, .financial-text { margin-top: 8px; font-size: 10.5px; line-height: 1.38; }
+            .contract-intro p, .contract-legal p, .contract-approval p, .financial-text p { margin: 0 0 5px; }
+            .contract-approval { margin-top: 4px; }
+            .contract-approval p { margin: 0 0 2px; }
+            .contract-items { margin-top: 8px; }
+            .table-wrap { margin-top: 2px; }
+            .sales-document-items-table { margin-top: 4px; }
+            .sales-document-items-table thead th, .sales-document-items-table tbody td { padding: 6px 7px; font-size: 10.5px; line-height: 1.15; }
+            .financial-block { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(180px, 0.9fr); gap: 12px; margin-top: 8px; }
+            .summary { width: auto; gap: 5px; }
+            .summary-row { padding: 6px 8px; font-size: 10.5px; }
+            .summary-row.total { font-size: 11.5px; }
+            .signatures { gap: 24px; margin-top: 2px; }
+            .signature-box { min-height: 96px; }
+            .signature-line { min-height: 44px; margin-bottom: 6px; }
+            .signature-name { font-size: 11px; }
+            .signature-doc { font-size: 10px; }
+            .contact { margin-top: 10px; padding-top: 6px; }
+            .contact strong { font-size: 12px; }
+            .contact p { font-size: 10px; line-height: 1.25; }
+          }
+          @media (max-width: 720px) { body { padding: 12px; } .sales-document-sheet { width: 100%; min-height: auto; padding: 16px; } .sales-print-header { flex-direction: row; align-items: flex-start; } .sales-print-meta { display: grid; grid-template-columns: 1fr; } .sales-print-summary { width: 100%; } .sales-print-signatures { grid-template-columns: 1fr; } .financial-block { flex-direction: column; } }
         </style>
       </head>
       <body>${html}</body>
@@ -7979,7 +9684,7 @@ function openPrintWindowForHtml(html, title) {
     action: "geracao_pdf",
     level: "Informativo",
     itemAffected: title || "Documento",
-    description: `Geracao de PDF/impressao no modulo ${getModuleLabel(state.activeModule)}.`,
+    description: `Geração de PDF/impressão no módulo ${getModuleLabel(state.activeModule)}.`,
     entityType: "document",
   });
 }
@@ -7991,6 +9696,10 @@ function createEmptyBomStructureDraft() {
     product_id: "",
     product_code: "",
     product_name: "",
+    category: "",
+    sale_option_id: "",
+    sale_option_code: "",
+    sale_option_label: "",
     name: "",
     version: "1.0",
     batch_size: "1",
@@ -8006,18 +9715,54 @@ function createEmptyBomStructureDraft() {
 }
 
 function buildBomComponentOptions() {
+  const selectedProductId = state.bomStructureDraft?.product_id || "";
+  const availableProducts = (state.moduleData.products || []).filter((item) => item.id !== selectedProductId);
+  const productOptions = availableProducts.map((item) => ({
+    value: `product:${item.id}`,
+    label: `Produto • ${item.name} (${item.code})`,
+  }));
   const materialOptions = (state.moduleData.bomMaterials || []).map((item) => ({
     value: `material:${item.id}`,
     label: `Material • ${item.name} (${item.code})`,
   }));
   const structureOptions = (state.moduleData.bomStructures || [])
-    .filter((item) => item.status === "active")
+    .filter((item) => item.status === "active" && item.id !== state.bomStructureDraft?.edit_id)
     .map((item) => ({
       value: `structure:${item.id}`,
       label: `Conjunto • ${item.name} v${item.version}`,
     }));
 
-  return [...materialOptions, ...structureOptions];
+  return [...productOptions, ...materialOptions, ...structureOptions];
+}
+
+function getBomDraftItemVariationOptions(item) {
+  const [type, productId] = String(item?.sourceKey || "").split(":");
+  if (type !== "product" || !productId) return [];
+
+  const product = (state.moduleData.products || []).find((productItem) => productItem.id === productId);
+  return normalizeProductSaleOptions(product).map((option) => ({
+    value: option.id || option.code || option.label,
+    label: `${option.code ? `${option.code} - ` : ""}${option.label}`,
+  }));
+}
+
+function getBomFinalProductVariationOptions() {
+  const product = (state.moduleData.products || []).find((productItem) => productItem.id === state.bomStructureDraft?.product_id);
+  return normalizeProductSaleOptions(product).map((option) => ({
+    value: option.id || option.code || option.label,
+    label: `${option.code ? `${option.code} - ` : ""}${option.label}`,
+  }));
+}
+
+function getBomFinalProductProductionSections() {
+  const product = (state.moduleData.products || []).find((productItem) => productItem.id === state.bomStructureDraft?.product_id);
+  return getProductProductionSections(product);
+}
+
+function findProductionSectionForProduct(product, sectionIdOrLabel) {
+  const value = String(sectionIdOrLabel || "").trim();
+  if (!value) return null;
+  return getProductProductionSections(product).find((section) => section.id === value || section.label === value) || null;
 }
 
 function buildProductOptions() {
@@ -8027,8 +9772,8 @@ function buildProductOptions() {
   }));
 }
 
-function getBomComponentByKey(sourceKey) {
-  const [type, id] = String(sourceKey || "").split(":");
+function getBomComponentByKey(sourceKey, saleOptionId = "") {
+  const [type, id, ...detailParts] = String(sourceKey || "").split(":");
   if (!type || !id) return null;
 
   if (type === "material") {
@@ -8041,6 +9786,59 @@ function getBomComponentByKey(sourceKey) {
       name: material.name,
       unit: material.unit,
       unitCost: Number(material.unit_cost || 0),
+    };
+  }
+
+  if (type === "product") {
+    if (id === state.bomStructureDraft?.product_id) return null;
+    const product = (state.moduleData.products || []).find((item) => item.id === id);
+    if (!product) return null;
+    const option = saleOptionId ? findProductSaleOption(product, saleOptionId) : null;
+    if (option) {
+      return {
+        type,
+        id,
+        code: option.code || product.code,
+        name: `${product.name} - ${option.label}`,
+        unit: product.unit,
+        unitCost: Number(option.price || 0),
+        saleOption: option,
+      };
+    }
+    return {
+      type,
+      id,
+      code: product.code,
+      name: product.name,
+      unit: product.unit,
+      unitCost: getProductBomUnitCost(product),
+    };
+  }
+
+  if (type === "product_option") {
+    if (id === state.bomStructureDraft?.product_id) return null;
+    const product = (state.moduleData.products || []).find((item) => item.id === id);
+    if (!product) return null;
+
+    let optionId = "";
+    try {
+      optionId = decodeURIComponent(detailParts.join(":"));
+    } catch {
+      optionId = detailParts.join(":");
+    }
+    const option = normalizeProductSaleOptions(product).find((item) =>
+      item.id === optionId || item.code === optionId || item.label === optionId
+    );
+    if (!option) return null;
+
+    return {
+      type: "product",
+      id,
+      code: option.code || product.code,
+      name: `${product.name} - ${option.label}`,
+      unit: product.unit,
+      unitCost: Number(option.price || 0),
+      saleOption: option,
     };
   }
 
@@ -8061,9 +9859,10 @@ function getBomComponentByKey(sourceKey) {
 }
 
 function getBomDraftItemComputed(item) {
-  const component = getBomComponentByKey(item.sourceKey);
-  const unitCost = Number(component?.unitCost || 0);
-  const quantity = Number(item.quantity || 0);
+  const component = getBomComponentByKey(item.sourceKey, item.saleOptionId);
+  const hasManualUnitCost = item.unitCost !== "" && item.unitCost !== null && item.unitCost !== undefined;
+  const unitCost = hasManualUnitCost ? parseCurrencyInput(item.unitCost) : Number(component?.unitCost || 0);
+  const quantity = Math.round(Number(item.quantity || 0));
   return {
     component,
     unitCost,
@@ -8076,6 +9875,246 @@ function calculateBomDraftTotal() {
   return state.bomDraftItems.reduce((total, item) => total + getBomDraftItemComputed(item).totalCost, 0);
 }
 
+function getProductBomUnitCost(product) {
+  if (!product) return 0;
+  const costPrice = Number(product.cost_price || 0);
+  return costPrice;
+}
+
+function resolveBomComponentForStructureRecalc(sourceKey, saleOptionId = "", context = {}) {
+  const { products = [], materials = [], structures = [], currentStructure = null } = context;
+  const [type, id, ...detailParts] = String(sourceKey || "").split(":");
+  if (!type || !id) return null;
+
+  if (type === "material") {
+    const material = materials.find((item) => item.id === id);
+    if (!material) return null;
+    return {
+      type,
+      id,
+      code: material.code,
+      name: material.name,
+      unit: material.unit,
+      unitCost: Number(material.unit_cost || 0),
+    };
+  }
+
+  if (type === "product" || type === "product_option") {
+    if (id === currentStructure?.product_id) return null;
+    const product = products.find((item) => item.id === id);
+    if (!product) return null;
+
+    let resolvedSaleOptionId = saleOptionId || "";
+    if (type === "product_option" && !resolvedSaleOptionId) {
+      try {
+        resolvedSaleOptionId = decodeURIComponent(detailParts.join(":"));
+      } catch {
+        resolvedSaleOptionId = detailParts.join(":");
+      }
+    }
+
+    const option = resolvedSaleOptionId ? findProductSaleOption(product, resolvedSaleOptionId) : null;
+    if (option) {
+      return {
+        type: "product",
+        id,
+        code: option.code || product.code,
+        name: `${product.name} - ${option.label}`,
+        unit: product.unit,
+        unitCost: Number(option.price || 0),
+        saleOption: option,
+      };
+    }
+
+    return {
+      type: "product",
+      id,
+      code: product.code,
+      name: product.name,
+      unit: product.unit,
+      unitCost: getProductBomUnitCost(product),
+    };
+  }
+
+  if (type === "structure") {
+    const structure = structures.find((item) => item.id === id);
+    if (!structure) return null;
+    return {
+      type,
+      id,
+      code: structure.code,
+      name: structure.name,
+      unit: structure.batch_unit,
+      unitCost: Number(structure.total_cost || 0),
+    };
+  }
+
+  return null;
+}
+
+function buildBomStructurePayloadFromRecord(structure, context = {}) {
+  const { products = [] } = context;
+  const selectedProduct = products.find((item) => item.id === structure.product_id);
+  const selectedSaleOption = selectedProduct
+    ? findProductSaleOption(
+      selectedProduct,
+      structure.sale_option_id || structure.sale_option_code || structure.sale_option_label || ""
+    )
+    : null;
+  const normalizedItems = (Array.isArray(structure.structure_items) ? structure.structure_items : [])
+    .map((item) => {
+      const sourceKey = item.source_key || `${item.source_type}:${item.component_id}`;
+      const component = resolveBomComponentForStructureRecalc(
+        sourceKey,
+        item.sale_option_id || item.sale_option_code || item.sale_option_label || "",
+        {
+        ...context,
+        currentStructure: structure,
+        }
+      );
+      const quantity = normalizeWholeNumber(item.quantity || 0, { min: 1, fallback: 1 });
+      const unitCost = component ? Number(component.unitCost || 0) : Number(item.unit_cost || 0);
+      return {
+        source_key: sourceKey,
+        source_type: component?.type || item.source_type || "",
+        component_id: component?.id || item.component_id || "",
+        code: component?.code || item.code || "",
+        name: component?.name || item.name || "",
+        unit: component?.unit || item.unit || "un",
+        sale_option_id: component?.saleOption?.id || "",
+        sale_option_code: component?.saleOption?.code || "",
+        sale_option_label: component?.saleOption?.label || "",
+        production_quantity: normalizeWholeNumber(component?.saleOption?.production_quantity || item.production_quantity || 0, { min: 0, fallback: 0 }),
+        kit_structure_id: component?.saleOption?.kit_structure_id || item.kit_structure_id || "",
+        production_section_id: item.production_section_id || "",
+        production_section_label: item.production_section_label || "",
+        quantity,
+        unit_cost: unitCost,
+        total_cost: unitCost * quantity,
+      };
+    })
+    .filter((item) => item.component_id && item.quantity > 0);
+
+  return {
+    code: selectedSaleOption?.code || selectedProduct?.code || structure.code || "",
+    product_id: structure.product_id || "",
+    product_code: selectedProduct?.code || structure.product_code || "",
+    product_name: selectedProduct?.name || structure.product_name || "",
+    category: normalizeCategoryInput(structure.category, "geral"),
+    sale_option_id: selectedSaleOption?.id || "",
+    sale_option_code: selectedSaleOption?.code || "",
+    sale_option_label: selectedSaleOption?.label || "",
+    name: selectedSaleOption ? `${selectedProduct?.name || ""} - ${selectedSaleOption.label}` : (selectedProduct?.name || structure.name || ""),
+    version: structure.version || "1.0",
+    batch_size: normalizeWholeNumber(structure.batch_size || 0, { min: 1, fallback: 1 }),
+    batch_unit: structure.batch_unit || "un",
+    status: structure.status || "draft",
+    total_cost: normalizedItems.reduce((sum, item) => sum + Number(item.total_cost || 0), 0),
+    instructions: structure.instructions || null,
+    height: normalizeWholeNumber(structure.height || 0, { min: 0, fallback: 0 }),
+    width: normalizeWholeNumber(structure.width || 0, { min: 0, fallback: 0 }),
+    length: normalizeWholeNumber(structure.length || 0, { min: 0, fallback: 0 }),
+    weight: normalizeWholeNumber(structure.weight || 0, { min: 0, fallback: 0 }),
+    notes: structure.notes || null,
+    attachments: Array.isArray(structure.attachments) ? structure.attachments : [],
+    structure_items: normalizedItems,
+  };
+}
+
+function getBomStructureComparableSnapshot(structure) {
+  return JSON.stringify({
+    code: structure.code || "",
+    product_code: structure.product_code || "",
+    product_name: structure.product_name || "",
+    category: structure.category || "",
+    sale_option_id: structure.sale_option_id || "",
+    sale_option_code: structure.sale_option_code || "",
+    sale_option_label: structure.sale_option_label || "",
+    name: structure.name || "",
+    batch_size: normalizeWholeNumber(structure.batch_size || 0, { min: 1, fallback: 1 }),
+    batch_unit: structure.batch_unit || "un",
+    total_cost: Number(structure.total_cost || 0),
+    height: normalizeWholeNumber(structure.height || 0, { min: 0, fallback: 0 }),
+    width: normalizeWholeNumber(structure.width || 0, { min: 0, fallback: 0 }),
+    length: normalizeWholeNumber(structure.length || 0, { min: 0, fallback: 0 }),
+    weight: normalizeWholeNumber(structure.weight || 0, { min: 0, fallback: 0 }),
+    structure_items: (Array.isArray(structure.structure_items) ? structure.structure_items : []).map((item) => ({
+      source_key: item.source_key || "",
+      source_type: item.source_type || "",
+      component_id: item.component_id || "",
+      code: item.code || "",
+      name: item.name || "",
+      unit: item.unit || "",
+      sale_option_id: item.sale_option_id || "",
+      sale_option_code: item.sale_option_code || "",
+      sale_option_label: item.sale_option_label || "",
+      production_quantity: normalizeWholeNumber(item.production_quantity || 0, { min: 0, fallback: 0 }),
+      kit_structure_id: item.kit_structure_id || "",
+      production_section_id: item.production_section_id || "",
+      production_section_label: item.production_section_label || "",
+      quantity: normalizeWholeNumber(item.quantity || 0, { min: 1, fallback: 1 }),
+      unit_cost: Number(item.unit_cost || 0),
+      total_cost: Number(item.total_cost || 0),
+    })),
+  });
+}
+
+async function syncBomStructuresForProductChange(productId) {
+  if (!productId) return { updatedCount: 0 };
+
+  const products = state.moduleData.products || [];
+  const materials = state.moduleData.bomMaterials || [];
+  const originalStructures = Array.isArray(state.moduleData.bomStructures) ? state.moduleData.bomStructures : [];
+  if (!originalStructures.length) {
+    return { updatedCount: 0 };
+  }
+
+  let workingStructures = originalStructures.map((structure) => ({
+    ...structure,
+    structure_items: Array.isArray(structure.structure_items) ? structure.structure_items.map((item) => ({ ...item })) : [],
+    attachments: Array.isArray(structure.attachments) ? structure.attachments.map((item) => ({ ...item })) : [],
+  }));
+
+  for (let pass = 0; pass < workingStructures.length + 2; pass += 1) {
+    let changedInPass = false;
+    workingStructures = workingStructures.map((structure) => {
+      const nextPayload = buildBomStructurePayloadFromRecord(structure, {
+        products,
+        materials,
+        structures: workingStructures,
+      });
+      const nextStructure = { ...structure, ...nextPayload };
+      if (getBomStructureComparableSnapshot(nextStructure) !== getBomStructureComparableSnapshot(structure)) {
+        changedInPass = true;
+      }
+      return nextStructure;
+    });
+    if (!changedInPass) break;
+  }
+
+  const changedStructures = workingStructures.filter((structure) => {
+    const original = originalStructures.find((item) => item.id === structure.id);
+    return original && getBomStructureComparableSnapshot(structure) !== getBomStructureComparableSnapshot(original);
+  });
+
+  if (!changedStructures.length) {
+    return { updatedCount: 0 };
+  }
+
+  for (const structure of changedStructures) {
+    const payload = buildBomStructurePayloadFromRecord(structure, {
+      products,
+      materials,
+      structures: workingStructures,
+    });
+    const { error } = await state.supabase.from("bom_structures").update(payload).eq("id", structure.id);
+    if (error) throw error;
+  }
+
+  state.moduleData.bomStructures = workingStructures;
+  return { updatedCount: changedStructures.length };
+}
+
 function renderBomStructureItemsSummary(structure) {
   const items = Array.isArray(structure.structure_items) ? structure.structure_items : [];
   if (!items.length) {
@@ -8083,8 +10122,126 @@ function renderBomStructureItemsSummary(structure) {
   }
 
   return items
-    .map((item) => `${escapeHtml(item.name || "-")} x ${formatQuantity(item.quantity)}`)
+    .map((item) => `${escapeHtml(item.name || "-")} x ${formatWholeQuantity(item.quantity)}`)
     .join("<br />");
+}
+
+function findBomStructureForSalesItem(item) {
+  const structures = state.moduleData.bomStructures || [];
+  if (item?.kit_structure_id) {
+    const linkedStructure = structures.find((structure) => structure.id === item.kit_structure_id);
+    if (linkedStructure) return linkedStructure;
+  }
+
+  const product = (state.moduleData.products || []).find((productItem) =>
+    productItem.id === item?.product_id
+    || productItem.code === item?.product_code
+    || productItem.name === item?.product_name
+  );
+  if (!product) return null;
+
+  const saleOptionId = String(item?.sale_option_id || "").trim();
+  const saleOptionLabel = String(item?.sale_option_label || "").trim();
+  const activeStructures = structures.filter((structure) =>
+    structure.status === "active"
+    && (
+      structure.product_id === product.id
+      || (structure.product_code && structure.product_code === product.code)
+      || (structure.product_name && structure.product_name === product.name)
+    )
+  );
+
+  if (saleOptionId || saleOptionLabel) {
+    const variationStructure = activeStructures.find((structure) =>
+      (saleOptionId && structure.sale_option_id === saleOptionId)
+      || (saleOptionLabel && structure.sale_option_label === saleOptionLabel)
+    );
+    if (variationStructure) return variationStructure;
+  }
+
+  return activeStructures.find((structure) => !structure.sale_option_id && !structure.sale_option_label) || activeStructures[0] || null;
+}
+
+function getBomStructureUnitValue(structure) {
+  const totalCost = Number(structure?.total_cost || 0);
+  const batchSize = Number(structure?.batch_size || 1);
+  if (!totalCost || totalCost <= 0) return 0;
+  return batchSize > 0 ? totalCost / batchSize : totalCost;
+}
+
+function getBomStructureComponentsText(structure) {
+  const items = Array.isArray(structure?.structure_items) ? structure.structure_items : [];
+  return normalizeBomComponentItems(items)
+    .map((item) => `${formatWholeQuantity(item.quantity || 0)}${item.unit ? ` ${item.unit}` : ""} - ${item.name || "-"}`)
+    .join("\n");
+}
+
+function normalizeBomComponentItems(items) {
+  return (Array.isArray(items) ? items : [])
+    .map((item) => ({
+      name: item.name || item.component_name || item.product_name || "-",
+      unit: item.unit || item.component_unit || "",
+      quantity: normalizeWholeNumber(item.quantity || item.qty || 0, { min: 0, fallback: 0 }),
+    }))
+    .filter((item) => item.name && item.quantity > 0);
+}
+
+function getSalesItemBomComponents(item) {
+  const structure = findBomStructureForSalesItem(item);
+  const structureItems = normalizeBomComponentItems(structure?.structure_items);
+  if (structureItems.length) return structureItems;
+  return normalizeBomComponentItems(item?.bom_components || item?.kit_components || item?.structure_items);
+}
+
+function renderBomComponentsList(items) {
+  if (!items.length) return "";
+
+  return `
+    <div class="bom-components-list">
+      <strong>Composição do conjunto:</strong>
+      ${items.map((item) => `
+        <div class="bom-components-line">
+          <strong>${escapeHtml(formatWholeQuantity(item.quantity || 0))}${item.unit ? ` ${escapeHtml(item.unit)}` : ""}</strong>
+          <span>${escapeHtml(item.name || "-")}</span>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderBomStructureComponentsList(structure) {
+  return renderBomComponentsList(normalizeBomComponentItems(structure?.structure_items));
+}
+
+function getSalesItemBomDescription(item) {
+  const components = getSalesItemBomComponents(item)
+    .map((component) => `${formatWholeQuantity(component.quantity || 0)}${component.unit ? ` ${component.unit}` : ""} - ${component.name || "-"}`)
+    .join("\n");
+  return components ? `Composição do conjunto:\n${components}` : "";
+}
+
+function renderSalesItemBomDescription(item) {
+  return renderBomComponentsList(getSalesItemBomComponents(item));
+}
+
+function getInventoryMovementBomDescription(item) {
+  return getSalesItemBomDescription({
+    product_id: item?.product_id,
+    product_code: item?.product_code,
+    product_name: item?.product_name,
+    sale_option_id: item?.sale_option_id,
+    sale_option_label: item?.sale_option_label,
+  });
+}
+
+function renderInventoryMovementBomDescription(item) {
+  return renderSalesItemBomDescription({
+    product_id: item?.product_id,
+    product_code: item?.product_code,
+    product_name: item?.product_name,
+    sale_option_id: item?.sale_option_id,
+    sale_option_label: item?.sale_option_label,
+  });
 }
 
 function formatFileSize(bytes) {
@@ -8120,6 +10277,9 @@ function hydrateBomDraftFromStructure(structure) {
     product_id: structure.product_id || "",
     product_code: structure.product_code || "",
     product_name: structure.product_name || "",
+    sale_option_id: structure.sale_option_id || "",
+    sale_option_code: structure.sale_option_code || "",
+    sale_option_label: structure.sale_option_label || "",
     name: structure.name || "",
     version: structure.version || "1.0",
     batch_size: String(structure.batch_size ?? "1"),
@@ -8133,10 +10293,25 @@ function hydrateBomDraftFromStructure(structure) {
     notes: structure.notes || "",
   };
 
-  state.bomDraftItems = (Array.isArray(structure.structure_items) ? structure.structure_items : []).map((item) => ({
-    sourceKey: item.source_key || `${item.source_type}:${item.component_id}`,
-    quantity: String(item.quantity ?? "1"),
-  }));
+  state.bomDraftItems = (Array.isArray(structure.structure_items) ? structure.structure_items : []).map((item) => {
+    const sourceKey = item.source_key || `${item.source_type}:${item.component_id}`;
+    const [type, productId, ...detailParts] = String(sourceKey || "").split(":");
+    let legacySaleOptionId = "";
+    if (type === "product_option") {
+      try {
+        legacySaleOptionId = decodeURIComponent(detailParts.join(":"));
+      } catch {
+        legacySaleOptionId = detailParts.join(":");
+      }
+    }
+    return {
+      sourceKey: type === "product_option" ? `product:${productId}` : sourceKey,
+      saleOptionId: item.sale_option_id || legacySaleOptionId || "",
+      productionSectionId: item.production_section_id || "",
+      unitCost: item.unit_cost ?? "",
+      quantity: String(item.quantity ?? "1"),
+    };
+  });
   if (!state.bomDraftItems.length) {
     state.bomDraftItems = [createEmptyBomDraftItem()];
   }
@@ -8157,6 +10332,10 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function escapeHtmlWithLineBreaks(value) {
+  return escapeHtml(value).replace(/\r?\n/g, "<br>");
 }
 
 function loadMachiningData() {
@@ -8185,30 +10364,9 @@ function persistMachiningPieces(pieces) {
 function syncMachiningDerivedData() {
   const remoteProduction = (state.moduleData.production || []).filter((item) => !String(item.id || "").startsWith("mach-order-"));
   const remoteInventory = (state.moduleData.inventory || []).filter((item) => !String(item.id || "").startsWith("mach-stock-"));
-  const machiningOrders = [];
   const machiningStockEntries = [];
 
   (state.moduleData.machiningPieces || []).forEach((piece) => {
-    (piece.productions || []).forEach((order) => {
-      machiningOrders.push({
-        id: order.id,
-        order_number: order.order_number,
-        product_name: piece.name,
-        product_code: piece.code,
-        batch_size: order.quantity_planned,
-        status: order.status === "Concluida" ? "completed" : "in_progress",
-        planned_start: String(order.created_at || "").slice(0, 10),
-        planned_end: String(order.completed_at || order.created_at || "").slice(0, 10),
-        notes: buildLegacyProductionNotes({
-          priority: "media",
-          lot_number: order.lot,
-          responsible_name: order.operator,
-          notes: `Usinagem por etapas • ${getMachiningCurrentStageLabel(order)}`,
-          origin: "machining",
-        }),
-      });
-    });
-
     (piece.stock_entries || []).forEach((entry) => {
       machiningStockEntries.push({
         id: entry.id,
@@ -8225,7 +10383,7 @@ function syncMachiningDerivedData() {
     });
   });
 
-  state.moduleData.production = [...machiningOrders, ...remoteProduction];
+  state.moduleData.production = remoteProduction;
   state.moduleData.inventory = [...machiningStockEntries, ...remoteInventory];
 }
 
@@ -8237,10 +10395,11 @@ function normalizeMachiningPieceRecord(piece) {
     quantity: Number(entry.quantity || 0),
     lot: String(entry.lot || ""),
     created_at: entry.created_at || new Date().toISOString(),
-    origin: entry.origin || "usinagem/producao",
-    notes: entry.notes || "Entrada automatica via usinagem",
+    origin: entry.origin || "usinagem/produção",
+    notes: entry.notes || "Entrada automática via usinagem",
     operator: entry.operator || "",
     product_name: String(entry.product_name || piece.finished_name || piece.name || "").trim(),
+    product_id: String(entry.product_id || piece.finished_product_id || "").trim(),
   }));
   const latestOrder = productions[0] || null;
 
@@ -8248,6 +10407,7 @@ function normalizeMachiningPieceRecord(piece) {
     id: piece.id || `mach-piece-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
     code: String(piece.code || "").trim(),
     name: String(piece.name || "").trim(),
+    finished_product_id: String(piece.finished_product_id || "").trim(),
     finished_name: String(piece.finished_name || piece.name || "").trim(),
     material: String(piece.material || "").trim(),
     description: String(piece.description || "").trim(),
@@ -8284,23 +10444,23 @@ function normalizeMachiningOrderRecord(order, fallbackProcesses = []) {
     lot: String(order.lot || ""),
     operator: String(order.operator || ""),
     finished_name: String(order.finished_name || "").trim(),
-    status: order.status || "Em Producao",
+    status: order.status || "Em Produção",
     current_step_index: Number.isFinite(Number(order.current_step_index)) ? Number(order.current_step_index) : 0,
     steps,
     created_at: order.created_at || new Date().toISOString(),
     completed_at: order.completed_at || null,
   };
 
-  normalized.status = normalized.status === "Concluida" || normalized.steps.every((step) => step.status === "Finalizada")
-    ? "Concluida"
-    : "Em Producao";
+  normalized.status = normalized.status === "Concluída" || normalized.steps.every((step) => step.status === "Finalizada")
+    ? "Concluída"
+    : "Em Produção";
   normalized.current_step_index = getCurrentMachiningStepIndex(normalized);
   return normalized;
 }
 
 function deriveMachiningPieceStatus(latestOrder, stockEntries) {
-  if (latestOrder && latestOrder.status !== "Concluida") return "Em Producao";
-  if (stockEntries.length || (latestOrder && latestOrder.status === "Concluida")) return "Finalizada";
+  if (latestOrder && latestOrder.status !== "Concluída") return "Em Produção";
+  if (stockEntries.length || (latestOrder && latestOrder.status === "Concluída")) return "Finalizada";
   return "Cadastro";
 }
 
@@ -8347,6 +10507,7 @@ function hydrateMachiningDraft(piece) {
     edit_id: piece.id,
     code: piece.code || "",
     name: piece.name || "",
+    finished_product_id: piece.finished_product_id || "",
     finished_name: piece.finished_name || piece.name || "",
     material: piece.material || "",
     description: piece.description || "",
@@ -8361,6 +10522,7 @@ function syncMachiningDraftFromForm(form) {
     edit_id: form.elements.namedItem("edit_id")?.value || "",
     code: form.elements.namedItem("code")?.value || "",
     name: form.elements.namedItem("name")?.value || "",
+    finished_product_id: form.elements.namedItem("finished_product_id")?.value || "",
     finished_name: form.elements.namedItem("finished_name")?.value || "",
     material: form.elements.namedItem("material")?.value || "",
     description: form.elements.namedItem("description")?.value || "",
@@ -8387,29 +10549,30 @@ async function handleMachiningSubmit(event) {
 
   const code = state.machiningDraft.code.trim();
   const name = state.machiningDraft.name.trim();
-  const finishedName = state.machiningDraft.finished_name.trim() || name;
+  const finishedProduct = (state.moduleData.products || []).find((product) => product.id === state.machiningDraft.finished_product_id);
+  const finishedName = (finishedProduct?.name || state.machiningDraft.finished_name || name).trim();
   const material = state.machiningDraft.material.trim();
   const description = state.machiningDraft.description.trim();
   const processes = resequenceMachiningProcesses(state.machiningDraft.processes);
   const editId = state.machiningDraft.edit_id || "";
 
   if (!code) {
-    showToast("O codigo da peca e obrigatorio.", "warning");
+    showToast("O código da peça e obrigatório.", "warning");
     return;
   }
 
   if (!name) {
-    showToast("O nome da peca e obrigatorio.", "warning");
+    showToast("O nome da peça e obrigatório.", "warning");
     return;
   }
 
   if (!processes.length) {
-    showToast("Adicione ao menos um processo de fabricacao.", "warning");
+    showToast("Adicione ao menos um processo de fabricação.", "warning");
     return;
   }
 
   if (processes.some((process) => !process.name)) {
-    showToast("O nome do processo e obrigatorio em todas as etapas.", "warning");
+    showToast("O nome do processo e obrigatório em todas as etapas.", "warning");
     return;
   }
 
@@ -8423,6 +10586,7 @@ async function handleMachiningSubmit(event) {
     id: editId || `mach-piece-${Date.now()}`,
     code,
     name,
+    finished_product_id: finishedProduct?.id || state.machiningDraft.finished_product_id || "",
     finished_name: finishedName,
     material,
     description,
@@ -8445,12 +10609,12 @@ async function handleMachiningSubmit(event) {
     action: editId ? "edicao" : "criacao",
     level: "Informativo",
     itemAffected: nextPiece.name,
-    description: `Cadastro de peca de usinagem ${editId ? "atualizado" : "criado"}.`,
+    description: `Cadastro de peça de usinagem ${editId ? "atualizado" : "criado"}.`,
     entityType: "machining_piece",
     entityId: nextPiece.id,
     payload: nextPiece,
   });
-  showToast("Peca cadastrada com sucesso.", "success");
+  showToast("Peça cadastrada com sucesso.", "success");
 }
 
 function syncMachiningStartDraftFromForm(form) {
@@ -8470,7 +10634,7 @@ async function handleMachiningStartProductionSubmit(event) {
   syncMachiningStartDraftFromForm(form);
 
   const pieceId = state.machiningStartDraft.piece_id;
-  const quantity = Number(state.machiningStartDraft.quantity || 0);
+  const quantity = normalizeWholeNumber(state.machiningStartDraft.quantity || 0, { min: 1, fallback: 0 });
   const lot = state.machiningStartDraft.lot.trim();
   const operator = state.machiningStartDraft.operator.trim() || getLoggedUserName("");
   const piece = findMachiningPiece(pieceId);
@@ -8508,7 +10672,7 @@ async function handleMachiningStartProductionSubmit(event) {
     lot,
     operator,
     finished_name: finishedName,
-    status: "Em Producao",
+    status: "Em Produção",
     current_step_index: 0,
     steps,
     created_at: new Date().toISOString(),
@@ -8532,12 +10696,12 @@ async function handleMachiningStartProductionSubmit(event) {
     action: "vinculo_producao",
     level: "Informativo",
     itemAffected: piece.name,
-    description: `Usinagem enviada para producao com lote ${lot}.`,
+    description: `Usinagem enviada para produção com lote ${lot}.`,
     entityType: "machining_order",
     entityId: nextOrder.id,
     payload: { piece_id: piece.id, quantity, lot, operator },
   });
-  showToast("Producao iniciada com sucesso.", "success");
+  showToast("Usinagem iniciada com sucesso.", "success");
 }
 
 function getLatestMachiningOrder(piece) {
@@ -8545,7 +10709,7 @@ function getLatestMachiningOrder(piece) {
 }
 
 function getCurrentMachiningStepIndex(order) {
-  const liveIndex = (order.steps || []).findIndex((step) => ["Pendente", "Em Producao", "Qualidade"].includes(step.status));
+  const liveIndex = (order.steps || []).findIndex((step) => ["Pendente", "Em Produção", "Qualidade"].includes(step.status));
   if (liveIndex >= 0) return liveIndex;
   const firstBlocked = (order.steps || []).findIndex((step) => step.status !== "Finalizada");
   return firstBlocked >= 0 ? firstBlocked : Math.max((order.steps || []).length - 1, 0);
@@ -8553,7 +10717,7 @@ function getCurrentMachiningStepIndex(order) {
 
 function getVisibleMachiningSteps(order) {
   const steps = order.steps || [];
-  if (order.status === "Concluida") {
+  if (order.status === "Concluída") {
     return steps.map((step, index) => ({ step, index }));
   }
 
@@ -8565,14 +10729,14 @@ function getVisibleMachiningSteps(order) {
 function getMachiningCurrentStageLabel(order) {
   const currentIndex = getCurrentMachiningStepIndex(order);
   const currentStep = order.steps?.[currentIndex];
-  if (!currentStep) return order.status === "Concluida" ? "Concluida" : "Aguardando";
+  if (!currentStep) return order.status === "Concluída" ? "Concluída" : "Aguardando";
   return `Etapa ${currentIndex + 1} • ${currentStep.name}`;
 }
 
 function renderMachiningStatusBadge(status) {
   const config = {
     Cadastro: "status-machining-draft",
-    "Em Producao": "status-machining-live",
+    "Em Produção": "status-machining-live",
     Finalizada: "status-machining-finished",
   };
   return `<span class="status-chip ${config[status] || "status-planned"}">${escapeHtml(status)}</span>`;
@@ -8581,12 +10745,12 @@ function renderMachiningStatusBadge(status) {
 function renderMachiningStepStatusBadge(status) {
   const classMap = {
     Pendente: "status-planned",
-    "Em Producao": "status-in_progress",
+    "Em Produção": "status-in_progress",
     Qualidade: "status-machining-quality",
     Finalizada: "status-completed",
     Bloqueada: "status-cancelled",
   };
-  const label = status === "Bloqueada" ? "Pendente" : status.replace("Em Producao", "Em Produção");
+  const label = status === "Bloqueada" ? "Pendente" : status.replace("Em Produção", "Em Produção");
   return `<span class="status-chip ${classMap[status] || "status-planned"}">${escapeHtml(label)}</span>`;
 }
 
@@ -8596,22 +10760,22 @@ function renderProductionStageStatusBadge(status) {
 
 function getProductionStepActionLabel(status) {
   if (status === "Pendente") return "Iniciar";
-  if (status === "Em Producao") return "Enviar p/ Qualidade";
+  if (status === "Em Produção") return "Enviar p/ Qualidade";
   if (status === "Qualidade") return "Finalizar";
-  if (status === "Finalizada") return "Concluida";
+  if (status === "Finalizada") return "Concluída";
   return "Aguardando";
 }
 
 function isProductionStepAdvanceDisabled(order, step) {
   const currentIndex = getCurrentMachiningStepIndex(order);
   const stepIndex = Number(step.sequence || 1) - 1;
-  return step.status === "Bloqueada" || step.status === "Finalizada" || order.status === "Concluida" || stepIndex !== currentIndex;
+  return step.status === "Bloqueada" || step.status === "Finalizada" || order.status === "Concluída" || stepIndex !== currentIndex;
 }
 
 function canStepAction(order, step) {
   return {
-    disableStart: step.status === "Finalizada" || order.status === "Concluida",
-    disableComplete: step.status === "Finalizada" || order.status === "Concluida",
+    disableStart: step.status === "Finalizada" || order.status === "Concluída",
+    disableComplete: step.status === "Finalizada" || order.status === "Concluída",
     isCurrentStep: Number(step.sequence || 1) - 1 === getCurrentMachiningStepIndex(order),
   };
 }
@@ -8644,15 +10808,15 @@ function handleMachiningStepAdvance(rawValue, forceComplete = false) {
     const step = order.steps?.[stepIndex];
     if (!step) return false;
     if (stepIndex !== currentIndex || step.status === "Bloqueada") {
-      showToast("Nao e possivel iniciar a proxima etapa antes de finalizar a anterior.", "warning");
+      showToast("Não é possível iniciar a próxima etapa antes de finalizar a anterior.", "warning");
       return false;
     }
 
     if (step.status === "Pendente" && !forceComplete) {
-      step.status = "Em Producao";
+      step.status = "Em Produção";
       step.started_at = step.started_at || new Date().toISOString();
-      step.operator = step.operator || getLoggedUserName(order.operator || "");
-      order.status = "Em Producao";
+      step.operator = getLoggedUserName(order.operator || "");
+      order.status = "Em Produção";
       auditSnapshot = {
         level: "Informativo",
         description: `Etapa ${step.sequence} iniciada na usinagem.`,
@@ -8663,11 +10827,11 @@ function handleMachiningStepAdvance(rawValue, forceComplete = false) {
       return true;
     }
 
-    if (step.status === "Em Producao" && !forceComplete) {
+    if (step.status === "Em Produção" && !forceComplete) {
       step.status = "Qualidade";
-      order.status = "Em Producao";
+      order.status = "Em Produção";
       auditSnapshot = {
-        level: "Atencao",
+        level: "Atenção",
         description: `Etapa ${step.sequence} enviada para qualidade.`,
         stepName: step.name,
         orderNumber: order.order_number,
@@ -8676,7 +10840,7 @@ function handleMachiningStepAdvance(rawValue, forceComplete = false) {
       return true;
     }
 
-    if (!["Qualidade", "Em Producao", "Pendente"].includes(step.status)) {
+    if (!["Qualidade", "Em Produção", "Pendente"].includes(step.status)) {
       return false;
     }
 
@@ -8684,16 +10848,16 @@ function handleMachiningStepAdvance(rawValue, forceComplete = false) {
     step.started_at = step.started_at || new Date().toISOString();
     step.completed_at = new Date().toISOString();
     step.operator = step.operator || getLoggedUserName(order.operator || "");
-    step.completed_by = step.operator || getLoggedUserName(order.operator || "");
+    step.completed_by = getLoggedUserName(step.operator || order.operator || "");
 
     const nextStep = order.steps[stepIndex + 1];
     if (nextStep) {
       nextStep.status = "Pendente";
       order.current_step_index = stepIndex + 1;
-      order.status = "Em Producao";
+      order.status = "Em Produção";
       auditSnapshot = {
         level: "Informativo",
-        description: `Etapa ${step.sequence} finalizada e proxima etapa liberada.`,
+        description: `Etapa ${step.sequence} finalizada e próxima etapa liberada.`,
         stepName: step.name,
         orderNumber: order.order_number,
         pieceName: piece.name,
@@ -8701,17 +10865,18 @@ function handleMachiningStepAdvance(rawValue, forceComplete = false) {
       showToast("Etapa finalizada com sucesso.", "success");
       showToast("Proxima etapa liberada.", "success");
     } else {
-      order.status = "Concluida";
+      order.status = "Concluída";
       order.completed_at = new Date().toISOString();
       order.current_step_index = stepIndex;
       piece.stock_entries = [
         {
           id: `mach-stock-${Date.now()}`,
+          product_id: piece.finished_product_id || "",
           quantity: order.quantity_planned,
           lot: order.lot,
           created_at: new Date().toISOString(),
-          origin: "usinagem/producao",
-          notes: `Entrada automatica apos concluir todas as etapas${order.finished_name ? ` • ${order.finished_name}` : ""}`,
+          origin: "usinagem/produção",
+          notes: `Entrada automática após concluir todas as etapas${order.finished_name ? ` • ${order.finished_name}` : ""}`,
           operator: step.completed_by || getLoggedUserName(order.operator || ""),
           product_name: order.finished_name || piece.finished_name || piece.name,
         },
@@ -8719,14 +10884,15 @@ function handleMachiningStepAdvance(rawValue, forceComplete = false) {
       ];
       auditSnapshot = {
         level: "Informativo",
-        description: "Usinagem concluida e peca enviada ao estoque.",
+        description: "Usinagem concluída e peça enviada ao estoque.",
         stepName: step.name,
         orderNumber: order.order_number,
         pieceName: piece.name,
       };
       showToast("Etapa finalizada com sucesso.", "success");
-      showToast("Producao concluida.", "success");
-      showToast("Peca enviada para estoque.", "success");
+      showToast("Produção concluída.", "success");
+      showToast("Peça enviada para estoque.", "success");
+      void persistMachiningFinishedProductStockEntry(piece, order, step);
     }
     return true;
   });
@@ -8781,6 +10947,45 @@ function updateMachiningOrder(pieceId, orderId, updater) {
   renderActiveModule();
 }
 
+async function persistMachiningFinishedProductStockEntry(piece, order, step) {
+  if (!state.supabase || !piece?.finished_product_id) {
+    return;
+  }
+
+  const product = (state.moduleData.products || []).find((item) => item.id === piece.finished_product_id);
+  if (!product) {
+    showToast("Produto acabado vinculado não encontrado no estoque.", "warning");
+    return;
+  }
+
+  const quantity = Number(order.quantity_planned || 0);
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    return;
+  }
+
+  try {
+    await persistProductMovement({
+      product,
+      movementPayload: {
+        product_id: product.id,
+        product_name: product.name,
+        product_code: product.code,
+        movement_type: "entry",
+        quantity,
+        batch: order.lot || product.batch || null,
+        machine_serial: product.machine_serial || null,
+        notes: `Entrada automática pela usinagem ${order.order_number}`,
+        moved_by_user_id: state.currentUser?.user_id || null,
+        moved_by_name: step.completed_by || getLoggedUserName(null),
+      },
+      nextStock: Number(product.current_stock || 0) + quantity,
+    });
+    await Promise.all([loadProductsTable(), loadInventoryMovementsTable()]);
+  } catch (error) {
+    showToast(`Usinagem concluída, mas a entrada no estoque real falhou: ${formatError(error)}`, "danger");
+  }
+}
+
 function getUserInitials(name) {
   const initials = String(name || "")
     .trim()
@@ -8828,7 +11033,7 @@ function bindGenericForm(formId, tableName, stateKey) {
       await loadTable(tableName, stateKey);
       renderActiveModule();
       if (tableName === "purchase_requests") {
-        showPurchaseNotification("Nova solicitacao de compra registrada.");
+        showPurchaseNotification("Nova solicitação de compra registrada.");
       } else {
         showToast(editId ? "Registro atualizado com sucesso." : "Registro salvo com sucesso.", "success");
       }
@@ -8877,7 +11082,7 @@ function bindMachiningModuleEvents() {
     addProcessButton.addEventListener("click", () => {
       syncMachiningDraftFromForm(document.querySelector("#machining-form"));
       if (state.machiningDraft.processes.length >= 8) {
-        showToast("A peca pode ter no maximo 8 processos.", "warning");
+        showToast("A peça pode ter no máximo 8 processos.", "warning");
         return;
       }
       state.machiningDraft.processes.push({
@@ -8944,7 +11149,7 @@ function bindMachiningModuleEvents() {
       const pieces = (state.moduleData.machiningPieces || []).filter((piece) => piece.id !== button.dataset.machiningDeleteId);
       persistMachiningPieces(pieces);
       renderActiveModule();
-      showToast("Peca excluida com sucesso.", "success");
+      showToast("Peça excluída com sucesso.", "success");
     });
   });
 
@@ -9055,6 +11260,10 @@ function bindProductionModuleEvents() {
 
   document.querySelectorAll("[data-production-delete-id]").forEach((button) => {
     button.addEventListener("click", async () => {
+      if (!isPermissionsAdmin()) {
+        showToast("Somente TI e ADMINISTRADOR podem excluir ordem de produção.", "warning");
+        return;
+      }
       try {
         const { error } = await state.supabase.from("production_orders").delete().eq("id", button.dataset.productionDeleteId);
         if (error) throw error;
@@ -9065,11 +11274,11 @@ function bindProductionModuleEvents() {
           action: "exclusao",
           level: "Critico",
           itemAffected: button.dataset.productionDeleteId,
-          description: "Ordem de producao excluida.",
+          description: "Ordem de produção excluída.",
           entityType: "production_order",
           entityId: button.dataset.productionDeleteId,
         });
-        showToast("Ordem excluida com sucesso.", "success");
+        showToast("Ordem excluída com sucesso.", "success");
       } catch (error) {
         showToast(formatError(error), "danger");
       }
@@ -9078,7 +11287,18 @@ function bindProductionModuleEvents() {
 
   document.querySelectorAll("[data-production-start-id]").forEach((button) => {
     button.addEventListener("click", async () => {
+      enterProductionFocusMode(button.dataset.productionStartId);
       await handleProductionStart(button.dataset.productionStartId);
+    });
+  });
+
+  document.querySelector("[data-production-exit-focus]")?.addEventListener("click", () => {
+    exitProductionFocusMode();
+  });
+
+  document.querySelectorAll("[data-production-print-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      handleProductionPrint(button.dataset.productionPrintId);
     });
   });
 
@@ -9315,7 +11535,7 @@ function bindSalesModuleEvents() {
         if (error) throw error;
         await loadTable("sales", "sales");
         renderActiveModule();
-        showToast("Venda excluida com sucesso.", "success");
+        showToast("Venda excluída com sucesso.", "success");
       } catch (error) {
         showToast(formatError(error), "danger");
       }
@@ -9327,15 +11547,23 @@ function bindSalesModuleEvents() {
       const sale = state.moduleData.sales.find((item) => item.id === button.dataset.salesFinalizeId);
       if (!sale) return;
 
-      try {
-        await finalizeSaleRecord(sale);
-        await loadTable("sales", "sales");
-        await loadTable("production_orders", "production");
-        renderActiveModule();
-        showToast("Venda finalizada e enviada para producao.", "success");
-      } catch (error) {
-        showToast(formatError(error), "danger");
-      }
+      state.salesDraft = hydrateSalesDraft(sale);
+      state.salesDraft.status = "finalized";
+      state.salesDraft.sale_date = new Date().toISOString().slice(0, 10);
+      state.salesDraft.delivery_days = "";
+      state.salesDraft.delivery_date = "";
+      state.openAccordionKey = "sales-form";
+      renderActiveModule();
+      document.querySelector("#sales-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      showToast("Informe o prazo de entrega para finalizar a venda.", "warning");
+    });
+  });
+
+  document.querySelectorAll("[data-sales-send-production-id]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const sale = state.moduleData.sales.find((item) => item.id === button.dataset.salesSendProductionId);
+      if (!sale) return;
+      await sendSaleToProduction(sale);
     });
   });
 
@@ -9369,7 +11597,7 @@ function bindSalesModuleEvents() {
 function bindSalesConfigEvents() {
   const ensureSalesConfigAccess = () => {
     if (canManageSalesTemplates()) return true;
-    showToast("Somente TI e ADMINISTRADOR podem alterar a configuracao de vendas.", "warning");
+    showToast("Somente TI e ADMINISTRADOR podem alterar a configuração de vendas.", "warning");
     return false;
   };
 
@@ -9398,6 +11626,13 @@ function bindSalesConfigEvents() {
     });
   });
 
+  document.querySelectorAll("[data-sales-template-open-pdf]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const template = getSalesTemplate(button.dataset.salesTemplateOpenPdf);
+      openSalesTemplatePdf(template.pdf_template_data_url);
+    });
+  });
+
   document.querySelectorAll("[data-sales-template-save]").forEach((button) => {
     button.addEventListener("click", async () => {
       if (!ensureSalesConfigAccess()) return;
@@ -9418,7 +11653,7 @@ function bindSalesConfigEvents() {
       try {
         syncSalesTemplateFromForm(button.dataset.salesTemplateDefault);
         await persistSalesDocumentSettings();
-        showToast("Modelo definido como padrao.", "success");
+        showToast("Modelo definido como padrão.", "success");
         renderActiveModule();
       } catch (error) {
         showToast(formatError(error), "danger");
@@ -9433,7 +11668,7 @@ function bindSalesConfigEvents() {
         state.salesDocumentSettings.templates[button.dataset.salesTemplateRestore] = createDefaultSalesTemplate(button.dataset.salesTemplateRestore);
         await persistSalesDocumentSettings();
         renderActiveModule();
-        showToast("Modelo restaurado para o padrao.", "success");
+        showToast("Modelo restaurado para o padrão.", "success");
       } catch (error) {
         showToast(formatError(error), "danger");
       }
@@ -9468,7 +11703,7 @@ function bindSalesConfigEvents() {
       void queueSystemLog({
         moduleKey: "sales",
         action: "edicao",
-        level: "Atencao",
+        level: "Atenção",
         itemAffected: "Logo da empresa",
         description: "Logo removida dos modelos comerciais.",
         entityType: "sales_company_settings",
@@ -9503,6 +11738,87 @@ function bindSalesConfigEvents() {
       }
     });
   }
+
+  document.querySelectorAll("[data-sales-template-remove-pdf]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      if (!ensureSalesConfigAccess()) return;
+      try {
+        syncSalesTemplateFromForm(button.dataset.salesTemplateRemovePdf);
+        state.salesDocumentSettings.templates[button.dataset.salesTemplateRemovePdf] = {
+          ...state.salesDocumentSettings.templates[button.dataset.salesTemplateRemovePdf],
+          pdf_template_name: "",
+          pdf_template_data_url: "",
+          pdf_template_updated_at: "",
+        };
+        await persistSalesDocumentSettings();
+        void queueSystemLog({
+          moduleKey: "sales",
+          action: "edicao",
+          level: "Atenção",
+          itemAffected: `PDF ${button.dataset.salesTemplateRemovePdf}`,
+          description: "PDF base removido do modelo comercial.",
+          entityType: "sales_template_settings",
+        });
+        renderActiveModule();
+        showToast("PDF base removido com sucesso.", "success");
+      } catch (error) {
+        showToast(formatError(error), "danger");
+      }
+    });
+  });
+
+  const templatePdfInput = document.querySelector('#sales-config-template-form input[name="pdf_template_file"]');
+  if (templatePdfInput) {
+    templatePdfInput.addEventListener("change", async (event) => {
+      if (!ensureSalesConfigAccess()) return;
+      const templateType = state.salesConfigTab;
+      const file = event.currentTarget.files?.[0];
+      if (!file || !templateType || templateType === "company") return;
+
+      if (!state.supabase || !state.accessToken) {
+        showToast("Conecte o sistema ao Supabase antes de enviar PDFs dos modelos.", "warning");
+        event.currentTarget.value = "";
+        return;
+      }
+
+      if (file.type !== "application/pdf" && !String(file.name || "").toLowerCase().endsWith(".pdf")) {
+        showToast("Selecione um arquivo PDF válido.", "warning");
+        event.currentTarget.value = "";
+        return;
+      }
+
+      if (file.size > SALES_TEMPLATE_PDF_MAX_SIZE) {
+        showToast(`O PDF precisa ter no máximo ${formatFileSize(SALES_TEMPLATE_PDF_MAX_SIZE)}.`, "warning");
+        event.currentTarget.value = "";
+        return;
+      }
+
+      try {
+        syncSalesTemplateFromForm(templateType);
+        state.salesDocumentSettings.templates[templateType] = {
+          ...state.salesDocumentSettings.templates[templateType],
+          pdf_template_name: file.name || `${templateType}.pdf`,
+          pdf_template_data_url: await readFileAsDataUrl(file),
+          pdf_template_updated_at: new Date().toISOString(),
+        };
+        await persistSalesDocumentSettings();
+        void queueSystemLog({
+          moduleKey: "sales",
+          action: "edicao",
+          level: "Informativo",
+          itemAffected: `PDF ${templateType}`,
+          description: "PDF base atualizado no modelo comercial.",
+          entityType: "sales_template_settings",
+        });
+        renderActiveModule();
+        showToast("PDF base carregado com sucesso.", "success");
+      } catch (error) {
+        showToast(formatError(error), "danger");
+      } finally {
+        event.currentTarget.value = "";
+      }
+    });
+  }
 }
 
 function bindSalesDocumentPreviewEvents() {
@@ -9523,6 +11839,9 @@ function bindSalesDocumentPreviewEvents() {
   document.querySelector("[data-sales-preview-print]")?.addEventListener("click", () => {
     openPrintWindowForHtml(state.salesDocumentPreview.html, state.salesDocumentPreview.title);
   });
+  document.querySelector("[data-sales-preview-open-template-pdf]")?.addEventListener("click", () => {
+    openSalesTemplatePdf(state.salesDocumentPreview.templatePdfDataUrl);
+  });
   document.querySelector("[data-sales-preview-send]")?.addEventListener("click", () => {
     openPreparedSalesDocumentShare();
   });
@@ -9536,8 +11855,8 @@ function closeSalesConfigModal() {
     moduleKey: "sales",
     action: "edicao",
     level: "Informativo",
-    itemAffected: "Configuracoes de documentos",
-    description: "Configuracoes dos modelos comerciais atualizadas.",
+    itemAffected: "Configurações de documentos",
+    description: "Configurações dos modelos comerciais atualizadas.",
     entityType: "sales_template_settings",
   });
   renderActiveModule();
@@ -9584,6 +11903,10 @@ function syncSalesCompanySettingsFromForm() {
     responsible_role: form.elements.namedItem("responsible_role")?.value || "",
     signature: form.elements.namedItem("signature")?.value || "",
   };
+  state.salesDocumentSettings.commercial = {
+    ...(state.salesDocumentSettings.commercial || {}),
+    pix_discount_percent: normalizePercentInput(form.elements.namedItem("pix_discount_percent")?.value || 0),
+  };
 }
 
 function openPreparedSalesDocumentShare() {
@@ -9627,9 +11950,77 @@ function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(new Error("Nao foi possivel ler o arquivo."));
+    reader.onerror = () => reject(new Error("Não foi possível ler o arquivo."));
     reader.readAsDataURL(file);
   });
+}
+
+function getDataUrlApproxSize(dataUrl) {
+  const base64 = String(dataUrl || "").split(",", 2)[1] || "";
+  return Math.ceil((base64.length * 3) / 4);
+}
+
+function loadImageFromDataUrl(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Não foi possível processar a imagem."));
+    image.src = dataUrl;
+  });
+}
+
+async function resizeProductImageFile(file) {
+  if (!file?.type?.startsWith("image/")) {
+    throw new Error("Envie uma imagem válida para a foto do produto.");
+  }
+
+  if (file.size > PRODUCT_PHOTO_MAX_SOURCE_SIZE) {
+    throw new Error("A foto original deve ter no máximo 8 MB.");
+  }
+
+  const originalDataUrl = await readFileAsDataUrl(file);
+  if (file.size <= PRODUCT_PHOTO_MAX_STORED_SIZE) {
+    return {
+      dataUrl: originalDataUrl,
+      size: getDataUrlApproxSize(originalDataUrl),
+      resized: false,
+    };
+  }
+
+  const image = await loadImageFromDataUrl(originalDataUrl);
+  const sourceWidth = image.naturalWidth || image.width;
+  const sourceHeight = image.naturalHeight || image.height;
+  if (!sourceWidth || !sourceHeight) {
+    throw new Error("Não foi possível identificar o tamanho da imagem.");
+  }
+
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("Seu navegador não conseguiu compactar a imagem.");
+  }
+
+  const scale = Math.min(1, PRODUCT_PHOTO_MAX_DIMENSION / Math.max(sourceWidth, sourceHeight));
+  const width = Math.max(1, Math.round(sourceWidth * scale));
+  const height = Math.max(1, Math.round(sourceHeight * scale));
+  canvas.width = width;
+  canvas.height = height;
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, width, height);
+  context.drawImage(image, 0, 0, width, height);
+
+  const firstPassDataUrl = canvas.toDataURL("image/jpeg", 0.74);
+  const firstPassSize = getDataUrlApproxSize(firstPassDataUrl);
+  if (firstPassSize <= PRODUCT_PHOTO_MAX_STORED_SIZE) {
+    return { dataUrl: firstPassDataUrl, size: firstPassSize, resized: true };
+  }
+
+  const fallbackDataUrl = canvas.toDataURL("image/jpeg", 0.56);
+  return {
+    dataUrl: fallbackDataUrl,
+    size: getDataUrlApproxSize(fallbackDataUrl),
+    resized: true,
+  };
 }
 
 function bindPurchasesModuleEvents() {
@@ -9729,8 +12120,8 @@ function bindPurchasesModuleEvents() {
       const request = (state.moduleData.purchases || []).find((item) => item.id === button.dataset.purchaseStatusAction);
       if (!request) return;
       try {
-        await updatePurchaseRequestStatus(request, button.dataset.purchaseNextStatus);
-        await loadTable("purchase_requests", "purchases");
+        const updatedRequest = await updatePurchaseRequestStatus(request, button.dataset.purchaseNextStatus);
+        upsertModuleRecord("purchases", updatedRequest || { ...request, status: button.dataset.purchaseNextStatus });
         renderActiveModule();
       } catch (error) {
         showPurchaseNotification(formatError(error), "danger");
@@ -9743,11 +12134,11 @@ function bindPurchasesModuleEvents() {
       try {
         const { error } = await state.supabase.from("purchase_requests").delete().eq("id", button.dataset.purchaseDeleteId);
         if (error) throw error;
-        await loadTable("purchase_requests", "purchases");
+        removeModuleRecord("purchases", button.dataset.purchaseDeleteId);
         resetPurchaseFormState();
         resetPurchaseConclusionState();
         renderActiveModule();
-        showPurchaseNotification("Solicitacao excluida com sucesso.", "approved");
+        showPurchaseNotification("Solicitação excluída com sucesso.", "approved");
       } catch (error) {
         showPurchaseNotification(formatError(error), "danger");
       }
@@ -9837,6 +12228,18 @@ function syncPurchaseDraftFromForm(form) {
 
 function syncPurchaseConclusionDraftFromForm(form) {
   if (!form) return;
+  const stockEntries = Array.from(form.querySelectorAll("[data-purchase-stock-entry-index]")).map((row) => ({
+    id: row.dataset.purchaseStockEntryId || "",
+    source_index: Number(row.dataset.purchaseStockEntryIndex || 0),
+    requested_product_name: row.dataset.purchaseStockRequestedName || "",
+    requested_description: row.dataset.purchaseStockRequestedDescription || "",
+    requested_unit: row.dataset.purchaseStockRequestedUnit || "",
+    product_id: row.querySelector("[data-purchase-stock-product]")?.value || "",
+    quantity: normalizeWholeNumber(row.querySelector("[data-purchase-stock-quantity]")?.value || 0, { min: 0, fallback: 0 }),
+    unit_cost: parseCurrencyInput(row.querySelector("[data-purchase-stock-cost]")?.value || 0),
+    stock_registered: row.dataset.purchaseStockRegistered === "true",
+    stock_registered_at: row.dataset.purchaseStockRegisteredAt || "",
+  }));
   state.purchaseConclusionDraft = {
     ...state.purchaseConclusionDraft,
     request_id: form.elements.namedItem("request_id")?.value || "",
@@ -9844,13 +12247,20 @@ function syncPurchaseConclusionDraftFromForm(form) {
     invoice_number: form.elements.namedItem("invoice_number")?.value || "",
     supplier: form.elements.namedItem("supplier")?.value || "",
     purchase_date: form.elements.namedItem("purchase_date")?.value || "",
+    due_date: form.elements.namedItem("due_date")?.value || "",
     payment_method: form.elements.namedItem("payment_method")?.value || "",
     total_amount: (() => {
       const field = form.elements.namedItem("total_amount");
       return String(field?.value || "").trim() ? getCurrencyInputNumber(form, "total_amount") : "";
     })(),
     purchase_notes: form.elements.namedItem("purchase_notes")?.value || "",
+    stock_entries: stockEntries,
   };
+  if (state.purchaseConclusionDraft.payment_method !== "Boleto") {
+    state.purchaseConclusionDraft.installments = [createEmptyPurchaseInstallmentDraft(1)];
+  } else if (!Array.isArray(state.purchaseConclusionDraft.installments) || !state.purchaseConclusionDraft.installments.length) {
+    state.purchaseConclusionDraft.installments = [createEmptyPurchaseInstallmentDraft(1)];
+  }
 }
 
 function resetPurchaseFormState() {
@@ -9868,11 +12278,42 @@ function normalizePurchaseItems(items) {
     .map((item) => ({
       product_name: String(item.product_name || "").trim(),
       description: String(item.description || "").trim(),
-      quantity: Number(item.quantity || 0),
+      quantity: normalizeWholeNumber(item.quantity || 0, { min: 1, fallback: 0 }),
       unit: String(item.unit || "un").trim() || "un",
       measures: String(item.measures || "").trim(),
     }))
     .filter((item) => item.product_name && item.quantity > 0);
+}
+
+function createPurchaseStockEntryDraft(item, index, existing = {}) {
+  return {
+    id: existing.id || `purchase-stock-${index + 1}`,
+    source_index: Number(existing.source_index ?? index),
+    requested_product_name: existing.requested_product_name || item.product_name || "",
+    requested_description: existing.requested_description || item.description || "",
+    requested_unit: existing.requested_unit || item.unit || "un",
+    product_id: existing.product_id || "",
+    quantity: normalizeWholeNumber(existing.quantity ?? item.quantity ?? 0, { min: 0, fallback: 0 }),
+    unit_cost: parseCurrencyInput(existing.unit_cost || 0),
+    stock_registered: Boolean(existing.stock_registered),
+    stock_registered_at: existing.stock_registered_at || "",
+  };
+}
+
+function normalizePurchaseStockEntries(entries, requestItems = []) {
+  const normalizedItems = normalizePurchaseItems(requestItems);
+  const sourceEntries = Array.isArray(entries) ? entries : [];
+  const entriesBySource = new Map(sourceEntries.map((entry, index) => [Number(entry.source_index ?? index), entry]));
+  const baseEntries = normalizedItems.length
+    ? normalizedItems.map((item, index) => createPurchaseStockEntryDraft(item, index, entriesBySource.get(index) || {}))
+    : sourceEntries.map((entry, index) => createPurchaseStockEntryDraft({}, index, entry));
+
+  return baseEntries.filter((entry) => entry.requested_product_name || entry.product_id || entry.quantity > 0);
+}
+
+function getPurchaseConclusionStockEntries(request) {
+  const metadata = getPurchaseRequestMetadata(request || {});
+  return normalizePurchaseStockEntries(state.purchaseConclusionDraft.stock_entries, metadata.items);
 }
 
 function hydratePurchaseDraft(request) {
@@ -9901,12 +12342,14 @@ function hydratePurchaseDraft(request) {
 
 function hydratePurchaseConclusionDraft(request) {
   const metadata = getPurchaseRequestMetadata(request);
+  const stockEntries = normalizePurchaseStockEntries(metadata.purchaseDetails.stock_entries, metadata.items);
   return {
     request_id: request.id || "",
     order_number: metadata.purchaseDetails.order_number || "",
     invoice_number: metadata.purchaseDetails.invoice_number || "",
     supplier: metadata.purchaseDetails.supplier || "",
     purchase_date: metadata.purchaseDetails.purchase_date || "",
+    due_date: metadata.purchaseDetails.due_date || "",
     payment_method: metadata.purchaseDetails.payment_method || "",
     total_amount: metadata.purchaseDetails.total_amount ? Number(metadata.purchaseDetails.total_amount) : "",
     purchase_notes: metadata.purchaseDetails.purchase_notes || "",
@@ -9914,6 +12357,16 @@ function hydratePurchaseConclusionDraft(request) {
     invoice_files: metadata.purchaseDetails.invoice_files || [],
     attachment_files: metadata.purchaseDetails.attachment_files || [],
     boleto_files: metadata.purchaseDetails.boleto_files || [],
+    installments: metadata.purchaseDetails.installments?.length
+      ? metadata.purchaseDetails.installments.map((installment, index) => ({
+        id: installment.id || `purchase-installment-${index + 1}`,
+        installment_number: Number(installment.installment_number || index + 1),
+        due_date: installment.due_date || "",
+        amount: installment.amount ? Number(installment.amount) : "",
+        boleto_files: Array.isArray(installment.boleto_files) ? installment.boleto_files : [],
+      }))
+      : [createEmptyPurchaseInstallmentDraft(1)],
+    stock_entries: stockEntries,
   };
 }
 
@@ -9924,17 +12377,17 @@ async function handlePurchaseSubmit(event) {
 
   const normalizedItems = normalizePurchaseItems(state.purchaseDraft.items);
   if (!state.purchaseDraft.requester_id && !state.purchaseDraft.requester_name.trim()) {
-    showPurchaseNotification("Preencha os campos obrigatorios.", "warning");
+    showPurchaseNotification("Preencha os campos obrigatórios.", "warning");
     return;
   }
 
   if (!state.purchaseDraft.department.trim()) {
-    showPurchaseNotification("Preencha os campos obrigatorios.", "warning");
+    showPurchaseNotification("Preencha os campos obrigatórios.", "warning");
     return;
   }
 
   if (!normalizedItems.length) {
-    showPurchaseNotification("Adicione ao menos um item na solicitacao.", "warning");
+    showPurchaseNotification("Adicione ao menos um item na solicitação.", "warning");
     return;
   }
 
@@ -9953,8 +12406,8 @@ async function handlePurchaseSubmit(event) {
 
   try {
     const isEditing = Boolean(state.purchaseDraft.edit_id);
-    await persistPurchaseRequest(payload, state.purchaseDraft.edit_id);
-    await loadTable("purchase_requests", "purchases");
+    const savedRequest = await persistPurchaseRequest(payload, state.purchaseDraft.edit_id);
+    upsertModuleRecord("purchases", savedRequest || { ...payload, id: state.purchaseDraft.edit_id || payload.request_number });
     resetPurchaseFormState();
     renderActiveModule();
     void queueSystemLog({
@@ -9962,12 +12415,12 @@ async function handlePurchaseSubmit(event) {
       action: isEditing ? "edicao" : "criacao",
       level: "Informativo",
       itemAffected: payload.request_number,
-      description: `Solicitacao de compra ${isEditing ? "atualizada" : "criada"} para ${payload.department}.`,
+      description: `Solicitação de compra ${isEditing ? "atualizada" : "criada"} para ${payload.department}.`,
       entityType: "purchase_request",
       entityId: payload.request_number,
       payload,
     });
-    showPurchaseNotification(isEditing ? "Solicitacao atualizada com sucesso." : "Solicitacao criada com sucesso.", isEditing ? "approved" : "created");
+    showPurchaseNotification(isEditing ? "Solicitação atualizada com sucesso." : "Solicitação criada com sucesso.", isEditing ? "approved" : "created");
   } catch (error) {
     showPurchaseNotification(formatError(error), "danger");
   }
@@ -9980,12 +12433,12 @@ async function handlePurchaseConclusionSubmit(event) {
 
   const request = (state.moduleData.purchases || []).find((item) => item.id === state.purchaseConclusionDraft.request_id);
   if (!request) {
-    showPurchaseNotification("Solicitacao nao encontrada.", "warning");
+    showPurchaseNotification("Solicitação não encontrada.", "warning");
     return;
   }
 
   if (!state.purchaseConclusionDraft.payment_method) {
-    showPurchaseNotification("Nao permitir concluir sem forma de pagamento.", "warning");
+    showPurchaseNotification("Não permitir concluir sem forma de pagamento.", "warning");
     return;
   }
 
@@ -10006,11 +12459,15 @@ async function handlePurchaseConclusionSubmit(event) {
   }
 
   const metadata = getPurchaseRequestMetadata(request);
+  const normalizedInstallments = state.purchaseConclusionDraft.payment_method === "Boleto"
+    ? normalizePurchaseInstallments(state.purchaseConclusionDraft.installments)
+    : [];
   const nextDetails = {
     order_number: state.purchaseConclusionDraft.order_number.trim(),
     invoice_number: state.purchaseConclusionDraft.invoice_number.trim(),
     supplier: state.purchaseConclusionDraft.supplier.trim(),
     purchase_date: state.purchaseConclusionDraft.purchase_date || null,
+    due_date: state.purchaseConclusionDraft.due_date || null,
     payment_method: state.purchaseConclusionDraft.payment_method,
     total_amount: totalAmount,
     purchase_notes: state.purchaseConclusionDraft.purchase_notes.trim(),
@@ -10018,9 +12475,46 @@ async function handlePurchaseConclusionSubmit(event) {
     invoice_files: state.purchaseConclusionDraft.invoice_files,
     attachment_files: state.purchaseConclusionDraft.attachment_files,
     boleto_files: state.purchaseConclusionDraft.payment_method === "Boleto" ? state.purchaseConclusionDraft.boleto_files : [],
+    installments: normalizedInstallments,
+    stock_entries: normalizePurchaseStockEntries(state.purchaseConclusionDraft.stock_entries, metadata.items),
   };
 
-  const notificationMessage = `Sua solicitacao foi concluida. Pedido ${nextDetails.order_number} registrado.`;
+  const invalidStockEntry = nextDetails.stock_entries.find((entry) =>
+    entry.product_id
+    && (!Number.isFinite(Number(entry.quantity || 0)) || Number(entry.quantity || 0) <= 0)
+  );
+  if (invalidStockEntry) {
+    showPurchaseNotification("Informe uma quantidade valida para dar entrada no estoque.", "warning");
+    return;
+  }
+
+  if (state.purchaseConclusionDraft.payment_method === "Boleto") {
+    if (!normalizedInstallments.length) {
+      showPurchaseNotification("Informe pelo menos uma parcela para o boleto.", "warning");
+      return;
+    }
+    const invalidInstallment = normalizedInstallments.find((installment) =>
+      !installment.due_date
+      || !Number.isFinite(Number(installment.amount || 0))
+      || Number(installment.amount || 0) <= 0
+      || !(installment.boleto_files || []).length
+    );
+    if (invalidInstallment) {
+      showPurchaseNotification("Cada parcela do boleto precisa de valor, vencimento e arquivo do boleto.", "warning");
+      return;
+    }
+    const installmentsTotal = normalizedInstallments.reduce((sum, installment) => sum + Number(installment.amount || 0), 0);
+    if (Math.abs(installmentsTotal - totalAmount) > 0.009) {
+      showPurchaseNotification("A soma das parcelas do boleto deve ser igual ao valor total da compra.", "warning");
+      return;
+    }
+    if (normalizedInstallments.length > 5) {
+      showPurchaseNotification("Limite de 5 parcelas por boleto.", "warning");
+      return;
+    }
+  }
+
+  const notificationMessage = `Sua solicitação foi concluída. Pedido ${nextDetails.order_number} registrado.`;
   const payload = {
     ...metadata,
     purchase_details: nextDetails,
@@ -10029,19 +12523,32 @@ async function handlePurchaseConclusionSubmit(event) {
   };
 
   try {
-    await persistPurchaseRequest(payload, request.id);
-    await loadTable("purchase_requests", "purchases");
+    const savedRequest = await persistPurchaseRequest(payload, request.id);
+    const stockResult = await processPurchaseStockEntries(request, nextDetails);
+    const persistedDetails = stockResult.details || nextDetails;
+    let finalSavedRequest = savedRequest || { ...request, ...payload };
+    if (stockResult.updated) {
+      finalSavedRequest = await persistPurchaseRequest({
+        ...payload,
+        purchase_details: persistedDetails,
+      }, request.id) || finalSavedRequest;
+    }
+    await ensurePayableFromPurchase(request, persistedDetails);
+    upsertModuleRecord("purchases", finalSavedRequest || { ...request, ...payload, purchase_details: persistedDetails });
+    if (hasPermission("payables", "view")) {
+      await loadPayablesTable();
+    }
     resetPurchaseConclusionState();
     renderActiveModule();
     void queueSystemLog({
       moduleKey: "purchases",
       action: "mudanca_status",
-      level: "Atencao",
+      level: "Atenção",
       itemAffected: metadata.request_number || request.id,
-      description: `Compra concluida com pedido ${nextDetails.order_number}.`,
+      description: `Compra concluída com pedido ${nextDetails.order_number}.`,
       entityType: "purchase_request",
       entityId: request.id,
-      payload: { status: "completed", purchase_details: nextDetails },
+      payload: { status: "completed", purchase_details: persistedDetails },
     });
     showPurchaseNotification("Compra efetuada com sucesso.", "purchase_completed");
     await notifyPurchaseRequester(request, notificationMessage, "completed");
@@ -10050,18 +12557,91 @@ async function handlePurchaseConclusionSubmit(event) {
   }
 }
 
+async function processPurchaseStockEntries(request, details) {
+  const entries = normalizePurchaseStockEntries(details.stock_entries, getPurchaseRequestMetadata(request).items);
+  if (!entries.some((entry) => entry.product_id && !entry.stock_registered)) {
+    return { details: { ...details, stock_entries: entries }, updated: false };
+  }
+
+  const nextEntries = [];
+  let updated = false;
+
+  for (const entry of entries) {
+    if (!entry.product_id || entry.stock_registered) {
+      nextEntries.push(entry);
+      continue;
+    }
+
+    const product = (state.moduleData.products || []).find((item) => item.id === entry.product_id);
+    if (!product) {
+      throw new Error(`Produto cadastrado nao encontrado para ${entry.requested_product_name || "item comprado"}.`);
+    }
+
+    const quantity = Number(entry.quantity || 0);
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      throw new Error(`Quantidade invalida para ${entry.requested_product_name || product.name}.`);
+    }
+
+    const unitCost = parseCurrencyInput(entry.unit_cost || 0);
+    const nextStock = Number(product.current_stock || 0) + quantity;
+    await persistProductMovement({
+      product,
+      movementPayload: {
+        product_id: product.id,
+        product_name: product.name,
+        product_code: product.code,
+        movement_type: "entry",
+        quantity,
+        unit_cost: unitCost,
+        batch: product.batch || null,
+        machine_serial: product.machine_serial || null,
+        notes: `Entrada pela compra ${details.order_number || getPurchaseRequestMetadata(request).request_number || request.id}`,
+        moved_by_user_id: state.currentUser?.user_id || null,
+        moved_by_name: getLoggedUserName(null),
+      },
+      nextStock,
+    });
+
+    upsertModuleRecord("products", {
+      ...product,
+      current_stock: nextStock,
+      cost_price: unitCost > 0 ? unitCost : product.cost_price,
+    });
+
+    nextEntries.push({
+      ...entry,
+      unit_cost: unitCost,
+      stock_registered: true,
+      stock_registered_at: new Date().toISOString(),
+    });
+    updated = true;
+  }
+
+  if (updated && hasPermission("inventory", "view")) {
+    await loadInventoryMovementsTable();
+  }
+
+  return {
+    details: {
+      ...details,
+      stock_entries: nextEntries,
+    },
+    updated,
+  };
+}
+
 function resolvePurchaseRequesterName(requesterId) {
   return (state.moduleData.users || []).find((user) => user.id === requesterId)?.full_name || "";
 }
 
 function buildPurchaseRequesterMessage(metadata) {
   if (metadata.status === "purchase_completed") {
-    return "Sua solicitacao de compra foi efetuada";
+    return "Sua solicitação de compra foi efetuada";
   }
   if (metadata.status === "completed") {
-    return "Sua solicitacao foi concluida";
+    return "Sua solicitação foi concluída";
   }
-  return `Atualizacao da solicitacao ${metadata.request_number || ""}`.trim();
+  return `Atualização da solicitação ${metadata.request_number || ""}`.trim();
 }
 
 async function notifyPurchaseRequester(request, message, soundType = "notified") {
@@ -10070,8 +12650,9 @@ async function notifyPurchaseRequester(request, message, soundType = "notified")
     ...metadata,
     notifications: appendPurchaseNotification(metadata.notifications, message, soundType),
   };
-  await persistPurchaseRequest(payload, request.id);
+  const savedRequest = await persistPurchaseRequest(payload, request.id);
   showPurchaseNotification("Solicitante notificado com sucesso.", soundType);
+  return savedRequest;
 }
 
 function appendPurchaseNotification(currentNotifications, message, type) {
@@ -10090,11 +12671,11 @@ async function updatePurchaseRequestStatus(request, nextStatus) {
   const metadata = getPurchaseRequestMetadata(request);
   const normalizedStatus = nextStatus === "purchase_completed" ? "purchase_completed" : nextStatus;
   const messages = {
-    approved: "Solicitacao aprovada com sucesso.",
+    approved: "Solicitação aprovada com sucesso.",
     purchase_completed: "Compra efetuada com sucesso.",
-    cancelled: "Solicitacao atualizada com sucesso.",
-    in_analysis: "Solicitacao atualizada com sucesso.",
-    in_purchase: "Solicitacao atualizada com sucesso.",
+    cancelled: "Solicitação atualizada com sucesso.",
+    in_analysis: "Solicitação atualizada com sucesso.",
+    in_purchase: "Solicitação atualizada com sucesso.",
   };
   const payload = {
     ...metadata,
@@ -10102,13 +12683,13 @@ async function updatePurchaseRequestStatus(request, nextStatus) {
     notifications: metadata.notifications,
   };
 
-  await persistPurchaseRequest(payload, request.id);
+  const savedRequest = await persistPurchaseRequest(payload, request.id);
   void queueSystemLog({
     moduleKey: "purchases",
     action: "mudanca_status",
-    level: ["cancelled"].includes(normalizedStatus) ? "Critico" : "Atencao",
+    level: ["cancelled"].includes(normalizedStatus) ? "Critico" : "Atenção",
     itemAffected: metadata.request_number || request.id,
-    description: `Status da solicitacao alterado para ${normalizedStatus}.`,
+    description: `Status da solicitação alterado para ${normalizedStatus}.`,
     entityType: "purchase_request",
     entityId: request.id,
     payload: { status: normalizedStatus },
@@ -10116,10 +12697,11 @@ async function updatePurchaseRequestStatus(request, nextStatus) {
 
   if (normalizedStatus === "purchase_completed" || normalizedStatus === "completed") {
     const refreshedRequest = { ...request, status: normalizedStatus };
-    await notifyPurchaseRequester(refreshedRequest, buildPurchaseRequesterMessage({ ...metadata, status: normalizedStatus }), normalizedStatus);
+    return notifyPurchaseRequester(refreshedRequest, buildPurchaseRequesterMessage({ ...metadata, status: normalizedStatus }), normalizedStatus);
   } else {
-    showPurchaseNotification(messages[normalizedStatus] || "Solicitacao atualizada com sucesso.", normalizedStatus);
+    showPurchaseNotification(messages[normalizedStatus] || "Solicitação atualizada com sucesso.", normalizedStatus);
   }
+  return savedRequest;
 }
 
 function handlePurchaseFileSelection(event) {
@@ -10140,6 +12722,75 @@ function handlePurchaseFileSelection(event) {
 function removePurchaseFile(key, index) {
   if (!key || !Array.isArray(state.purchaseConclusionDraft[key])) return;
   state.purchaseConclusionDraft[key].splice(index, 1);
+}
+
+function normalizePurchaseInstallments(installments) {
+  return (Array.isArray(installments) ? installments : [])
+    .map((installment, index) => ({
+      id: installment.id || `purchase-installment-${index + 1}`,
+      installment_number: Number(installment.installment_number || index + 1),
+      due_date: String(installment.due_date || "").trim(),
+      amount: Number(installment.amount || 0),
+      boleto_files: Array.isArray(installment.boleto_files) ? installment.boleto_files : [],
+    }))
+    .filter((installment) => installment.installment_number > 0);
+}
+
+function addPurchaseInstallment() {
+  const current = normalizePurchaseInstallments(state.purchaseConclusionDraft.installments);
+  if (current.length >= 5) {
+    showPurchaseNotification("Limite de 5 parcelas por boleto.", "warning");
+    return;
+  }
+  state.purchaseConclusionDraft.installments = [...current, createEmptyPurchaseInstallmentDraft(current.length + 1)];
+}
+
+function removePurchaseInstallment(index) {
+  const current = normalizePurchaseInstallments(state.purchaseConclusionDraft.installments);
+  if (current.length <= 1) {
+    state.purchaseConclusionDraft.installments = [createEmptyPurchaseInstallmentDraft(1)];
+    return;
+  }
+  current.splice(index, 1);
+  state.purchaseConclusionDraft.installments = current.map((item, itemIndex) => ({
+    ...item,
+    installment_number: itemIndex + 1,
+  }));
+}
+
+function handlePurchaseInstallmentFieldChange(event) {
+  const index = Number(event.currentTarget.dataset.purchaseInstallmentIndex);
+  const field = event.currentTarget.dataset.purchaseInstallmentField;
+  const installments = normalizePurchaseInstallments(state.purchaseConclusionDraft.installments);
+  const installment = installments[index];
+  if (!installment) return;
+  installment[field] = field === "amount"
+    ? String(event.currentTarget.value || "").trim() ? Number(event.currentTarget.value) : ""
+    : event.currentTarget.value || "";
+  state.purchaseConclusionDraft.installments = installments;
+}
+
+function handlePurchaseInstallmentFileSelection(event) {
+  const index = Number(event.currentTarget.dataset.purchaseInstallmentUploadIndex);
+  const installments = normalizePurchaseInstallments(state.purchaseConclusionDraft.installments);
+  const installment = installments[index];
+  if (!installment) return;
+  const files = Array.from(event.currentTarget.files || []).map((file) => ({
+    name: file.name,
+    type: file.type || "",
+    size: file.size || 0,
+  }));
+  installment.boleto_files = [...(installment.boleto_files || []), ...files];
+  state.purchaseConclusionDraft.installments = installments;
+  event.currentTarget.value = "";
+  renderActiveModule();
+}
+
+function removePurchaseInstallmentFile(index, fileIndex) {
+  const installments = normalizePurchaseInstallments(state.purchaseConclusionDraft.installments);
+  const installment = installments[index];
+  if (!installment || !Array.isArray(installment.boleto_files)) return;
+  installment.boleto_files.splice(fileIndex, 1);
 }
 
 function getPurchaseRequestMetadata(request) {
@@ -10200,11 +12851,13 @@ function getPurchaseRequestMetadata(request) {
 
 function normalizePurchaseDetails(details) {
   const source = typeof details === "object" && details !== null ? details : {};
+  const installments = normalizePurchaseInstallments(source.installments || []);
   return {
     order_number: source.order_number || "",
     invoice_number: source.invoice_number || "",
     supplier: source.supplier || "",
     purchase_date: source.purchase_date || "",
+    due_date: source.due_date || "",
     payment_method: source.payment_method || "",
     total_amount: Number(source.total_amount || 0),
     purchase_notes: source.purchase_notes || "",
@@ -10212,6 +12865,35 @@ function normalizePurchaseDetails(details) {
     invoice_files: Array.isArray(source.invoice_files) ? source.invoice_files : [],
     attachment_files: Array.isArray(source.attachment_files) ? source.attachment_files : [],
     boleto_files: Array.isArray(source.boleto_files) ? source.boleto_files : [],
+    stock_entries: normalizePurchaseStockEntries(source.stock_entries || [], source.request_items || source.items || []),
+    quotation_details: typeof source.quotation_details === "object" && source.quotation_details !== null
+      ? {
+        quote_number: source.quotation_details.quote_number || "",
+        supplier_company: source.quotation_details.supplier_company || "",
+        supplier_contact: source.quotation_details.supplier_contact || "",
+        supplier_phone: source.quotation_details.supplier_phone || "",
+        general_notes: source.quotation_details.general_notes || "",
+        whatsapp_message: source.quotation_details.whatsapp_message || "",
+        pdf_file_name: source.quotation_details.pdf_file_name || "",
+        pdf_storage_bucket: source.quotation_details.pdf_storage_bucket || "",
+        pdf_storage_path: source.quotation_details.pdf_storage_path || "",
+        pdf_public_url: source.quotation_details.pdf_public_url || "",
+        pdf_generated_at: source.quotation_details.pdf_generated_at || "",
+      }
+      : {
+        quote_number: "",
+        supplier_company: "",
+        supplier_contact: "",
+        supplier_phone: "",
+        general_notes: "",
+        whatsapp_message: "",
+        pdf_file_name: "",
+        pdf_storage_bucket: "",
+        pdf_storage_path: "",
+        pdf_public_url: "",
+        pdf_generated_at: "",
+      },
+    installments,
   };
 }
 
@@ -10225,7 +12907,7 @@ async function persistPurchaseRequest(payload, editId) {
     sector: payload.department || null,
     urgency: payload.urgency || "media",
     priority: payload.urgency || "media",
-    item_name: items[0]?.product_name || "Solicitacao de compra",
+    item_name: items[0]?.product_name || "Solicitação de compra",
     quantity: items[0]?.quantity || 1,
     justification: payload.justification || null,
     status: payload.status || "pending",
@@ -10236,10 +12918,10 @@ async function persistPurchaseRequest(payload, editId) {
   };
 
   const query = editId
-    ? state.supabase.from("purchase_requests").update(dbPayload).eq("id", editId)
-    : state.supabase.from("purchase_requests").insert(dbPayload);
-  const { error } = await query;
-  if (!error) return;
+    ? state.supabase.from("purchase_requests").update(dbPayload).eq("id", editId).select().single()
+    : state.supabase.from("purchase_requests").insert(dbPayload).select().single();
+  const { data, error } = await query;
+  if (!error) return data;
   if (!isPurchaseSchemaCompatibilityError(error)) {
     throw error;
   }
@@ -10254,10 +12936,11 @@ async function persistPurchaseRequest(payload, editId) {
     justification: buildLegacyPurchaseJustification(dbPayload),
   };
   const legacyQuery = editId
-    ? state.supabase.from("purchase_requests").update(legacyPayload).eq("id", editId)
-    : state.supabase.from("purchase_requests").insert(legacyPayload);
-  const { error: legacyError } = await legacyQuery;
+    ? state.supabase.from("purchase_requests").update(legacyPayload).eq("id", editId).select().single()
+    : state.supabase.from("purchase_requests").insert(legacyPayload).select().single();
+  const { data: legacyData, error: legacyError } = await legacyQuery;
   if (legacyError) throw legacyError;
+  return legacyData;
 }
 
 function buildLegacyPurchaseJustification(payload) {
@@ -10310,7 +12993,7 @@ function purchaseStatusCell(status) {
     approved: "Aprovada",
     in_purchase: "Em compra",
     purchase_completed: "Compra efetuada",
-    completed: "Concluida",
+    completed: "Concluída",
     cancelled: "Cancelada",
   };
   const classMap = {
@@ -10325,6 +13008,684 @@ function purchaseStatusCell(status) {
   return `<span class="status-chip ${classMap[status] || "status-pending"}">${mapping[status] || status}</span>`;
 }
 
+function getPayableCategoryOptions() {
+  return [
+    { value: "Energia", label: "Energia" },
+    { value: "Matéria-prima", label: "Matéria-prima" },
+    { value: "Manutencao", label: "Manutencao" },
+    { value: "Impostos", label: "Impostos" },
+    { value: "Serviços", label: "Serviços" },
+    { value: "Internet", label: "Internet" },
+    { value: "Aluguel", label: "Aluguel" },
+    { value: "Compras", label: "Compras" },
+    { value: "Produção", label: "Produção" },
+    { value: "Outros", label: "Outros" },
+  ];
+}
+
+function getPayableFrequencyOptions() {
+  return [
+    { value: "weekly", label: "Semanal" },
+    { value: "monthly", label: "Mensal" },
+    { value: "quarterly", label: "Trimestral" },
+    { value: "semiannual", label: "Semestral" },
+    { value: "annual", label: "Anual" },
+  ];
+}
+
+function getPayableTypeLabel(value) {
+  return value === "fixed" ? "Fixa" : "Variavel";
+}
+
+function normalizePayablePaymentMethod(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return "";
+  if (normalized.includes("pix")) return "pix";
+  if (normalized.includes("boleto")) return "boleto";
+  if (normalized.includes("cart")) return "cartao";
+  if (normalized.includes("transf")) return "transferencia";
+  if (normalized.includes("notinha") || normalized.includes("nota")) return "boleto";
+  return normalized;
+}
+
+function normalizePayableAttachments(files) {
+  return (Array.isArray(files) ? files : []).map((file) => ({
+    id: file.id || `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    name: file.name || "arquivo",
+    type: file.type || "",
+    size: Number(file.size || 0),
+    category: file.category || "anexo",
+    data_url: file.data_url || "",
+    created_at: file.created_at || new Date().toISOString(),
+  }));
+}
+
+function getPayableMetadata(payable) {
+  const dueDate = payable?.due_date ? new Date(`${payable.due_date}T12:00:00`) : null;
+  const now = new Date();
+  const todayStart = new Date(`${now.toISOString().slice(0, 10)}T00:00:00`);
+  const normalizedStatus = payable?.status === "paid"
+    ? "paid"
+    : payable?.status === "cancelled"
+      ? "cancelled"
+      : dueDate && dueDate.getTime() < todayStart.getTime()
+        ? "overdue"
+        : "pending";
+  const daysUntilDue = dueDate
+    ? Math.ceil((dueDate.getTime() - todayStart.getTime()) / (24 * 60 * 60 * 1000))
+    : null;
+  const paymentMethod = normalizePayablePaymentMethod(payable?.payment_method);
+  const attachments = normalizePayableAttachments(payable?.attachments);
+  const paymentLog = Array.isArray(payable?.payment_log) ? payable.payment_log : [];
+
+  return {
+    payable_number: payable?.payable_number || "",
+    description: payable?.description || "",
+    supplier: payable?.supplier || "",
+    category: payable?.category || "Outros",
+    amount: Number(payable?.amount || 0),
+    due_date: payable?.due_date || "",
+    paid_at: payable?.paid_at || "",
+    payment_method: paymentMethod,
+    payment_method_label: paymentMethod ? getPaymentMethodLabel(paymentMethod) : "-",
+    status: normalizedStatus,
+    account_type: payable?.account_type || "variable",
+    frequency: payable?.frequency || "",
+    auto_generate: Boolean(payable?.auto_generate),
+    purchase_request_id: payable?.purchase_request_id || "",
+    purchase_request_number: payable?.purchase_request_number || "",
+    purchase_installment_number: Number(payable?.purchase_installment_number || 0),
+    purchase_installment_label: payable?.purchase_installment_label || "",
+    source_module: payable?.source_module || "",
+    generated_from_payable_id: payable?.generated_from_payable_id || "",
+    notes: payable?.notes || "",
+    attachments,
+    paymentLog,
+    daysUntilDue,
+    isDueToday: normalizedStatus === "pending" && daysUntilDue === 0,
+    isUpcoming: normalizedStatus === "pending" && daysUntilDue !== null && daysUntilDue > 0 && daysUntilDue <= 3,
+    isOverdue: normalizedStatus === "overdue",
+    priorityRank: normalizedStatus === "overdue" ? 0 : normalizedStatus === "pending" && daysUntilDue === 0 ? 1 : normalizedStatus === "pending" && daysUntilDue !== null && daysUntilDue <= 3 ? 2 : normalizedStatus === "pending" ? 3 : normalizedStatus === "paid" ? 4 : 5,
+  };
+}
+
+function payableStatusCell(status) {
+  const mapping = {
+    pending: "Pendente",
+    paid: "Pago",
+    overdue: "Atrasado",
+    cancelled: "Cancelado",
+  };
+  const classMap = {
+    pending: "status-pending",
+    paid: "status-completed",
+    overdue: "status-cancelled",
+    cancelled: "status-cancelled",
+  };
+  return `<span class="status-chip ${classMap[status] || "status-pending"}">${mapping[status] || status}</span>`;
+}
+
+function getPayablesSnapshot(payables = state.moduleData.payables || []) {
+  const today = new Date().toISOString().slice(0, 10);
+  const weekEnd = getDateShiftedIso(today, 6);
+  const monthPrefix = today.slice(0, 7);
+  const normalized = payables
+    .map((item) => ({ payable: item, metadata: getPayableMetadata(item) }))
+    .sort((left, right) => {
+      if (left.metadata.priorityRank !== right.metadata.priorityRank) {
+        return left.metadata.priorityRank - right.metadata.priorityRank;
+      }
+      return String(left.metadata.due_date || "").localeCompare(String(right.metadata.due_date || ""));
+    });
+  const pendingLike = normalized.filter(({ metadata }) => ["pending", "overdue"].includes(metadata.status));
+  const totalDueToday = pendingLike
+    .filter(({ metadata }) => metadata.due_date === today)
+    .reduce((sum, entry) => sum + entry.metadata.amount, 0);
+  const totalWeek = pendingLike
+    .filter(({ metadata }) => metadata.due_date >= today && metadata.due_date <= weekEnd)
+    .reduce((sum, entry) => sum + entry.metadata.amount, 0);
+  const totalMonth = pendingLike
+    .filter(({ metadata }) => String(metadata.due_date || "").startsWith(monthPrefix))
+    .reduce((sum, entry) => sum + entry.metadata.amount, 0);
+  const overdue = normalized.filter(({ metadata }) => metadata.status === "overdue");
+  const totalOverdue = overdue.reduce((sum, entry) => sum + entry.metadata.amount, 0);
+  const totalPaid = normalized
+    .filter(({ metadata }) => metadata.status === "paid")
+    .reduce((sum, entry) => sum + entry.metadata.amount, 0);
+  const receivables = (state.moduleData.sales || [])
+    .map((sale) => getSaleMetadata(sale))
+    .filter((metadata) => metadata.status === "finalized")
+    .reduce((sum, metadata) => sum + Number(metadata.total || 0), 0);
+
+  return {
+    entries: normalized,
+    pending: pendingLike,
+    overdue,
+    totalDueToday,
+    totalWeek,
+    totalMonth,
+    totalOverdue,
+    totalPaid,
+    cashFlow: receivables - (totalWeek || 0),
+  };
+}
+
+function generatePayableNumber() {
+  const now = new Date();
+  return `CP-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}-${formatShortId(now.toISOString())}`;
+}
+
+function resetPayableDraftState() {
+  state.payablesDraft = createEmptyPayableDraft();
+}
+
+function resetPayablePaymentDraftState() {
+  state.payablesPaymentDraft = createEmptyPayablePaymentDraft();
+}
+
+function hydratePayableDraft(payable) {
+  const metadata = getPayableMetadata(payable);
+  state.payablesDraft = {
+    edit_id: payable.id || "",
+    payable_number: metadata.payable_number || "",
+    description: metadata.description || "",
+    supplier: metadata.supplier || "",
+    category: metadata.category || "Outros",
+    amount: metadata.amount ? String(metadata.amount) : "",
+    due_date: metadata.due_date || new Date().toISOString().slice(0, 10),
+    payment_method: metadata.payment_method || "",
+    status: metadata.status === "overdue" ? "pending" : metadata.status,
+    account_type: metadata.account_type || "variable",
+    frequency: metadata.frequency || "monthly",
+    auto_generate: metadata.auto_generate,
+    purchase_request_id: metadata.purchase_request_id || "",
+    purchase_request_number: metadata.purchase_request_number || "",
+    source_module: metadata.source_module || "",
+    generated_from_payable_id: metadata.generated_from_payable_id || "",
+    notes: metadata.notes || "",
+    attachments: metadata.attachments || [],
+  };
+}
+
+function hydratePayablePaymentDraft(payable) {
+  const metadata = getPayableMetadata(payable);
+  state.payablesPaymentDraft = {
+    payable_id: payable.id || "",
+    payment_date: new Date().toISOString().slice(0, 10),
+    payment_method: metadata.payment_method || "",
+    payment_notes: "",
+  };
+}
+
+async function handlePayableAttachmentSelection(event) {
+  const files = Array.from(event.currentTarget.files || []);
+  if (!files.length) return;
+  const category = event.currentTarget.dataset.payableAttachmentCategory || "anexo";
+  const nextFiles = await Promise.all(files.map(async (file) => ({
+    id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    name: file.name,
+    type: file.type || "",
+    size: file.size || 0,
+    category,
+    data_url: await readFileAsDataUrl(file),
+    created_at: new Date().toISOString(),
+  })));
+  state.payablesDraft.attachments = [...(state.payablesDraft.attachments || []), ...nextFiles];
+  event.currentTarget.value = "";
+  renderActiveModule();
+}
+
+function removePayableAttachment(index) {
+  if (!Array.isArray(state.payablesDraft.attachments)) return;
+  state.payablesDraft.attachments.splice(index, 1);
+}
+
+async function persistPayableRecord(payload, editId) {
+  const amount = Number(payload.amount || 0);
+  const dbPayload = {
+    payable_number: payload.payable_number || generatePayableNumber(),
+    description: payload.description?.trim() || "",
+    supplier: payload.supplier?.trim() || "",
+    category: payload.category || "Outros",
+    amount: Number.isFinite(amount) ? amount : 0,
+    due_date: payload.due_date || new Date().toISOString().slice(0, 10),
+    paid_at: payload.paid_at || null,
+    payment_method: normalizePayablePaymentMethod(payload.payment_method) || null,
+    status: payload.status || "pending",
+    account_type: payload.account_type || "variable",
+    frequency: payload.account_type === "fixed" ? (payload.frequency || "monthly") : null,
+    auto_generate: payload.account_type === "fixed" ? Boolean(payload.auto_generate) : false,
+    purchase_request_id: payload.purchase_request_id || null,
+    purchase_request_number: payload.purchase_request_number || null,
+    purchase_installment_number: payload.purchase_installment_number || null,
+    purchase_installment_label: payload.purchase_installment_label || null,
+    source_module: payload.source_module || null,
+    generated_from_payable_id: payload.generated_from_payable_id || null,
+    attachments: normalizePayableAttachments(payload.attachments),
+    payment_log: Array.isArray(payload.payment_log) ? payload.payment_log : [],
+    notes: payload.notes?.trim() || null,
+    updated_by_user_id: state.currentUser?.user_id || state.currentUser?.id || null,
+    updated_by_name: getLoggedUserName("-"),
+    updated_at: new Date().toISOString(),
+  };
+
+  if (!editId) {
+    dbPayload.created_by_user_id = state.currentUser?.user_id || state.currentUser?.id || null;
+    dbPayload.created_by_name = getLoggedUserName("-");
+  }
+  if (dbPayload.status === "paid") {
+    dbPayload.paid_by_user_id = payload.paid_by_user_id || state.currentUser?.user_id || state.currentUser?.id || null;
+    dbPayload.paid_by_name = payload.paid_by_name || getLoggedUserName("-");
+  }
+
+  const query = editId
+    ? state.supabase.from("accounts_payable").update(dbPayload).eq("id", editId).select().single()
+    : state.supabase.from("accounts_payable").insert(dbPayload).select().single();
+  const { data, error } = await query;
+  if (error) throw error;
+  return data || dbPayload;
+}
+
+function addFrequency(dateValue, frequency) {
+  const date = new Date(`${dateValue}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return dateValue;
+  if (frequency === "weekly") date.setDate(date.getDate() + 7);
+  else if (frequency === "quarterly") date.setMonth(date.getMonth() + 3);
+  else if (frequency === "semiannual") date.setMonth(date.getMonth() + 6);
+  else if (frequency === "annual") date.setFullYear(date.getFullYear() + 1);
+  else date.setMonth(date.getMonth() + 1);
+  return date.toISOString().slice(0, 10);
+}
+
+async function ensureRecurringPayable(payable) {
+  const metadata = getPayableMetadata(payable);
+  if (metadata.account_type !== "fixed" || !metadata.auto_generate || !metadata.frequency) return;
+
+  const { data: existing, error: existingError } = await state.supabase
+    .from("accounts_payable")
+    .select("id")
+    .eq("generated_from_payable_id", payable.id)
+    .limit(1);
+  if (existingError) throw existingError;
+  if (existing?.length) return;
+
+  await persistPayableRecord({
+    payable_number: generatePayableNumber(),
+    description: metadata.description,
+    supplier: metadata.supplier,
+    category: metadata.category,
+    amount: metadata.amount,
+    due_date: addFrequency(metadata.due_date, metadata.frequency),
+    payment_method: metadata.payment_method,
+    status: "pending",
+    account_type: metadata.account_type,
+    frequency: metadata.frequency,
+    auto_generate: metadata.auto_generate,
+    source_module: metadata.source_module || "payables",
+    generated_from_payable_id: payable.id,
+    attachments: metadata.attachments,
+    notes: metadata.notes,
+  });
+}
+
+async function handlePayableSubmit(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const formData = new FormData(form);
+  state.payablesDraft = {
+    ...state.payablesDraft,
+    edit_id: formData.get("edit_id")?.toString() || "",
+    payable_number: formData.get("payable_number")?.toString() || "",
+    description: formData.get("description")?.toString().trim() || "",
+    supplier: formData.get("supplier")?.toString().trim() || "",
+    category: formData.get("category")?.toString() || "Outros",
+    amount: formData.get("amount")?.toString() || "",
+    due_date: formData.get("due_date")?.toString() || "",
+    payment_method: formData.get("payment_method")?.toString() || "",
+    account_type: formData.get("account_type")?.toString() || "variable",
+    frequency: formData.get("frequency")?.toString() || "monthly",
+    auto_generate: formData.get("auto_generate") === "on",
+    notes: formData.get("notes")?.toString() || "",
+    attachments: state.payablesDraft.attachments || [],
+    purchase_request_id: state.payablesDraft.purchase_request_id || "",
+    purchase_request_number: state.payablesDraft.purchase_request_number || "",
+    source_module: state.payablesDraft.source_module || "",
+    generated_from_payable_id: state.payablesDraft.generated_from_payable_id || "",
+  };
+
+  if (!state.payablesDraft.description || !state.payablesDraft.supplier || !state.payablesDraft.due_date) {
+    showPayableNotification("Preencha descrição, fornecedor e vencimento.", "warning");
+    return;
+  }
+
+  const amount = Number(state.payablesDraft.amount || 0);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    showPayableNotification("Informe um valor valido para a conta.", "warning");
+    return;
+  }
+
+  try {
+    const isEditing = Boolean(state.payablesDraft.edit_id);
+    const persisted = await persistPayableRecord({
+      ...state.payablesDraft,
+      amount,
+      status: "pending",
+    }, state.payablesDraft.edit_id);
+    upsertModuleRecord("payables", persisted);
+    resetPayableDraftState();
+    renderActiveModule();
+    void queueSystemLog({
+      moduleKey: "payables",
+      action: isEditing ? "edicao" : "criacao",
+      level: "Informativo",
+      itemAffected: persisted.payable_number,
+      description: `Conta a pagar ${isEditing ? "atualizada" : "criada"} para ${persisted.supplier}.`,
+      entityType: "accounts_payable",
+      entityId: persisted.payable_number,
+      payload: persisted,
+    });
+    showPayableNotification(isEditing ? "Conta atualizada com sucesso." : "Conta criada com sucesso.", isEditing ? "approved" : "created");
+  } catch (error) {
+    showPayableNotification(formatError(error), "danger");
+  }
+}
+
+async function handlePayablePaymentSubmit(event) {
+  event.preventDefault();
+  const formData = new FormData(event.currentTarget);
+  const payableId = formData.get("payable_id")?.toString() || state.payablesPaymentDraft.payable_id;
+  const payable = (state.moduleData.payables || []).find((item) => item.id === payableId);
+  if (!payable) {
+    showPayableNotification("Conta a pagar não encontrada.", "warning");
+    return;
+  }
+
+  const metadata = getPayableMetadata(payable);
+  if (metadata.status === "paid") {
+    showPayableNotification("Pagamento duplicado bloqueado: esta conta já foi paga.", "danger");
+    return;
+  }
+
+  const paymentDate = formData.get("payment_date")?.toString() || "";
+  const paymentMethod = normalizePayablePaymentMethod(formData.get("payment_method")?.toString() || "");
+  const paymentNotes = formData.get("payment_notes")?.toString().trim() || "";
+
+  if (!paymentDate || !paymentMethod) {
+    showPayableNotification("Informe data e forma de pagamento.", "warning");
+    return;
+  }
+
+  const paymentLog = [
+    {
+      action: "paid",
+      paid_at: `${paymentDate}T12:00:00`,
+      payment_method: paymentMethod,
+      notes: paymentNotes,
+      user_id: state.currentUser?.user_id || state.currentUser?.id || null,
+      user_name: getLoggedUserName("-"),
+    },
+    ...(Array.isArray(payable.payment_log) ? payable.payment_log : []),
+  ];
+
+  try {
+    const persisted = await persistPayableRecord({
+      ...payable,
+      ...metadata,
+      paid_at: `${paymentDate}T12:00:00`,
+      payment_method: paymentMethod,
+      payment_log: paymentLog,
+      paid_by_user_id: state.currentUser?.user_id || state.currentUser?.id || null,
+      paid_by_name: getLoggedUserName("-"),
+      status: "paid",
+      notes: paymentNotes || metadata.notes,
+    }, payable.id);
+    await ensureRecurringPayable(payable);
+    upsertModuleRecord("payables", persisted);
+    resetPayablePaymentDraftState();
+    renderActiveModule();
+    void queueSystemLog({
+      moduleKey: "payables",
+      action: "pagamento",
+      level: "Atenção",
+      itemAffected: metadata.payable_number || payable.id,
+      description: `Conta paga via ${getPaymentMethodLabel(paymentMethod)}.`,
+      entityType: "accounts_payable",
+      entityId: payable.id,
+      payload: persisted,
+    });
+    showPayableNotification("Pagamento registrado com sucesso.", "completed");
+  } catch (error) {
+    showPayableNotification(formatError(error), "danger");
+  }
+}
+
+async function cancelPayableRecord(payableId) {
+  const payable = (state.moduleData.payables || []).find((item) => item.id === payableId);
+  if (!payable) return;
+  const metadata = getPayableMetadata(payable);
+  if (metadata.status === "paid") {
+    showPayableNotification("Uma conta paga não pode ser cancelada.", "warning");
+    return;
+  }
+
+  try {
+    const persisted = await persistPayableRecord({
+      ...payable,
+      ...metadata,
+      status: "cancelled",
+    }, payable.id);
+    upsertModuleRecord("payables", persisted);
+    renderActiveModule();
+    void queueSystemLog({
+      moduleKey: "payables",
+      action: "cancelamento",
+      level: "Critico",
+      itemAffected: metadata.payable_number || payable.id,
+      description: "Conta a pagar cancelada.",
+      entityType: "accounts_payable",
+      entityId: payable.id,
+      payload: persisted,
+    });
+    showPayableNotification("Conta cancelada.", "warning");
+  } catch (error) {
+    showPayableNotification(formatError(error), "danger");
+  }
+}
+
+function inferPayableCategoryFromPurchase(metadata) {
+  const department = String(metadata.department || "").toLowerCase();
+  if (department.includes("manut")) return "Manutencao";
+  if (department.includes("produc")) return "Produção";
+  return "Compras";
+}
+
+function buildPurchasePayableInstallments(details) {
+  const normalizedMethod = normalizePayablePaymentMethod(details.payment_method);
+  if (normalizedMethod !== "boleto") {
+    return [{
+      installment_number: 1,
+      due_date: details.due_date || details.purchase_date || new Date().toISOString().slice(0, 10),
+      amount: Number(details.total_amount || 0),
+      boleto_files: Array.isArray(details.boleto_files) ? details.boleto_files : [],
+    }];
+  }
+
+  const installments = normalizePurchaseInstallments(details.installments || []);
+  if (installments.length) {
+    return installments;
+  }
+
+  return [{
+    installment_number: 1,
+    due_date: details.due_date || details.purchase_date || new Date().toISOString().slice(0, 10),
+    amount: Number(details.total_amount || 0),
+    boleto_files: Array.isArray(details.boleto_files) ? details.boleto_files : [],
+  }];
+}
+
+function shouldCreatePayableFromPurchase(paymentMethod) {
+  const normalized = normalizePayablePaymentMethod(paymentMethod);
+  return normalized === "boleto";
+}
+
+async function ensurePayableFromPurchase(request, details) {
+  if (!shouldCreatePayableFromPurchase(details.payment_method)) return;
+
+  const requestId = request.id || null;
+  const metadata = getPurchaseRequestMetadata(request);
+  const installments = buildPurchasePayableInstallments(details);
+  const { data: existing, error } = await state.supabase
+    .from("accounts_payable")
+    .select("*")
+    .eq("purchase_request_id", requestId)
+    .order("purchase_installment_number", { ascending: true });
+  if (error) throw error;
+  const existingMap = new Map((existing || []).map((record) => [Number(record.purchase_installment_number || 1), record]));
+  const seen = new Set();
+
+  for (const installment of installments) {
+    const installmentNumber = Number(installment.installment_number || 1);
+    const existingRecord = existingMap.get(installmentNumber) || null;
+    const attachments = normalizePayableAttachments([
+      ...(details.invoice_files || []).map((file) => ({ ...file, category: "nota_fiscal" })),
+      ...(installment.boleto_files || []).map((file) => ({ ...file, category: "boleto" })),
+      ...(details.order_files || []).map((file) => ({ ...file, category: "pedido" })),
+      ...(details.attachment_files || []).map((file) => ({ ...file, category: "anexo" })),
+    ]);
+    const baseDescription = metadata.primaryItemLabel
+      ? `Compra ${metadata.primaryItemLabel}`
+      : `Compra ${metadata.request_number || request.id}`;
+    const payload = {
+      payable_number: existingRecord?.payable_number || `${generatePayableNumber()}-P${String(installmentNumber).padStart(2, "0")}`,
+      description: installments.length > 1 ? `${baseDescription} - Parcela ${installmentNumber}` : baseDescription,
+      supplier: details.supplier || metadata.requester_name || "Fornecedor não informado",
+      category: inferPayableCategoryFromPurchase(metadata),
+      amount: Number(installment.amount || 0),
+      due_date: installment.due_date || details.due_date || details.purchase_date || new Date().toISOString().slice(0, 10),
+      payment_method: normalizePayablePaymentMethod(details.payment_method),
+      status: "pending",
+      account_type: "variable",
+      purchase_request_id: requestId,
+      purchase_request_number: metadata.request_number || "",
+      purchase_installment_number: installmentNumber,
+      purchase_installment_label: installments.length > 1 ? `Parcela ${installmentNumber}/${installments.length}` : "Parcela unica",
+      source_module: "purchases",
+      attachments,
+      notes: details.purchase_notes || "",
+    };
+
+    await persistPayableRecord(payload, existingRecord?.id || "");
+    seen.add(installmentNumber);
+    void queueSystemLog({
+      moduleKey: "payables",
+      action: existingRecord ? "edicao_automatica" : "criacao_automatica",
+      level: "Atenção",
+      itemAffected: payload.payable_number,
+      description: `Conta a pagar ${existingRecord ? "atualizada" : "criada"} automaticamente a partir de compras (${payload.purchase_installment_label}).`,
+      entityType: "accounts_payable",
+      entityId: existingRecord?.id || payload.payable_number,
+      payload,
+    });
+  }
+
+  const obsolete = (existing || []).filter((record) => !seen.has(Number(record.purchase_installment_number || 1)));
+  if (obsolete.length) {
+    const { error: deleteError } = await state.supabase
+      .from("accounts_payable")
+      .delete()
+      .in("id", obsolete.map((record) => record.id));
+    if (deleteError) throw deleteError;
+  }
+}
+
+function showPayableNotification(message, type = "warning") {
+  const toastType = type === "danger"
+    ? "danger"
+    : type === "warning" || type === "created"
+      ? "warning"
+      : "success";
+  showToast(message, toastType);
+  playNotificationSound(type === "completed" ? "completed" : type);
+}
+
+function watchPayablesAlerts() {
+  if (!hasPermission("payables", "view")) return;
+  const snapshot = getPayablesSnapshot();
+  const upcoming = snapshot.entries.filter(({ metadata }) => metadata.isUpcoming);
+  const dueToday = snapshot.entries.filter(({ metadata }) => metadata.isDueToday);
+  const overdue = snapshot.entries.filter(({ metadata }) => metadata.isOverdue);
+  const now = Date.now();
+
+  const upcomingSignature = upcoming.map((entry) => entry.payable.id).join(",");
+  if (upcoming.length && upcomingSignature !== state.payablesAlertState.upcomingSignature) {
+    state.payablesAlertState.upcomingSignature = upcomingSignature;
+    showPayableNotification(`${upcoming.length} conta(s) vencem nos proximos 3 dias.`, "warning");
+  }
+
+  const todaySignature = dueToday.map((entry) => entry.payable.id).join(",");
+  if (dueToday.length && todaySignature !== state.payablesAlertState.todaySignature) {
+    state.payablesAlertState.todaySignature = todaySignature;
+    showPayableNotification(`${dueToday.length} conta(s) vencem hoje. Priorize o pagamento.`, "danger");
+  }
+
+  const overdueSignature = overdue.map((entry) => entry.payable.id).join(",");
+  if (overdue.length && (
+    overdueSignature !== state.payablesAlertState.overdueSignature
+    || now - state.payablesAlertState.lastOverdueAt >= 300000
+  )) {
+    state.payablesAlertState.overdueSignature = overdueSignature;
+    state.payablesAlertState.lastOverdueAt = now;
+    showPayableNotification(`${overdue.length} conta(s) estao atrasadas. Alerta continuo ativo.`, "danger");
+  }
+}
+
+function subscribeToPayableNotifications() {
+  if (!state.supabase || !hasPermission("payables", "view")) return;
+  if (state.payableChannel) return;
+
+  state.payableChannel = state.supabase
+    .channel("accounts_payable_live")
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "accounts_payable" },
+      async () => {
+        await loadPayablesTable();
+        if (["payables", "dashboard", "reports"].includes(state.activeModule)) {
+          renderActiveModule();
+        }
+      }
+    )
+    .subscribe();
+}
+
+function subscribeToProductionNotifications() {
+  if (!state.supabase || !hasPermission("production", "view")) return;
+  if (state.productionChannel) return;
+
+  state.productionChannel = state.supabase
+    .channel("production_orders_live")
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "production_orders" },
+      async (payload) => {
+        const nextOrder = payload.new || {};
+        const previousOrder = payload.old || {};
+        await loadTable("production_orders", "production");
+        if (["production", "dashboard", "reports"].includes(state.activeModule)) {
+          renderActiveModule();
+        }
+        if (payload.eventType === "INSERT") {
+          showProductionNotification(`Nova OP criada: ${nextOrder.order_number || "ordem de produção"}.`, "created");
+        } else if (previousOrder.status !== nextOrder.status && nextOrder.status === "completed") {
+          showProductionNotification(`OP ${nextOrder.order_number || ""} finalizada.`, "completed");
+        } else if (previousOrder.current_step_index !== nextOrder.current_step_index) {
+          showProductionNotification(`OP ${nextOrder.order_number || ""}: próxima etapa liberada.`, "notified");
+        }
+      }
+    )
+    .subscribe();
+}
+
 function handleSalesCustomerSelection(event) {
   const customer = (state.moduleData.customers || []).find((item) => item.id === event.currentTarget.value);
   if (!customer) return;
@@ -10336,6 +13697,28 @@ function handleSalesCustomerSelection(event) {
   renderActiveModule();
 }
 
+function getAppScrollElement() {
+  return document.querySelector(".main-content") || document.scrollingElement || document.documentElement;
+}
+
+async function renderSalesModulePreservingScroll(itemIndex = null) {
+  const scrollElement = getAppScrollElement();
+  const previousScrollY = window.scrollY;
+  const previousScrollTop = scrollElement?.scrollTop || 0;
+  await renderActiveModule();
+  if (itemIndex !== null && itemIndex !== undefined) {
+    const row = document.querySelector(`[data-sales-item-index="${CSS.escape(String(itemIndex))}"]`);
+    if (row) {
+      row.scrollIntoView({ behavior: "auto", block: "center" });
+      return;
+    }
+  }
+  if (scrollElement) {
+    scrollElement.scrollTop = previousScrollTop;
+  }
+  window.scrollTo({ top: previousScrollY, left: 0, behavior: "auto" });
+}
+
 function handleSalesItemFieldChange(event) {
   const index = Number(event.currentTarget.dataset.salesItemIndex);
   const field = event.currentTarget.dataset.salesItemField;
@@ -10344,16 +13727,64 @@ function handleSalesItemFieldChange(event) {
 
   if (field === "product_id") {
     const product = (state.moduleData.products || []).find((productItem) => productItem.id === event.currentTarget.value);
+    const saleOptions = normalizeProductSaleOptions(product);
+    const firstOption = saleOptions[0] || null;
+    const draftItem = {
+      product_id: event.currentTarget.value,
+      product_name: product?.name || "",
+      product_code: firstOption?.code || product?.code || "",
+      sale_option_id: firstOption?.id || "",
+      sale_option_label: firstOption?.label || "",
+      kit_structure_id: firstOption?.kit_structure_id || "",
+    };
+    const linkedStructure = findBomStructureForSalesItem(draftItem);
+    const bomUnitValue = getBomStructureUnitValue(linkedStructure);
+    const productSalePrice = product ? parseCurrencyInput(product.sale_price || 0) : 0;
     item[field] = event.currentTarget.value;
     item.product_name = product?.name || "";
-    item.product_code = product?.code || "";
-    item.unit_price = product ? parseCurrencyInput(product.sale_price || 0) : 0;
-    renderActiveModule();
+    item.product_code = firstOption?.code || product?.code || "";
+    item.sale_option_id = firstOption?.id || "";
+    item.sale_option_label = firstOption?.label || "";
+    item.kit_structure_id = firstOption?.kit_structure_id || linkedStructure?.id || "";
+    item.production_quantity = firstOption?.production_quantity || "";
+    item.unit_price = firstOption?.price || bomUnitValue || productSalePrice || 0;
+    void renderSalesModulePreservingScroll(index);
+    return;
+  }
+
+  if (field === "sale_option_id") {
+    const product = (state.moduleData.products || []).find((productItem) => productItem.id === item.product_id);
+    const option = findProductSaleOption(product, event.currentTarget.value);
+    const draftItem = {
+      ...item,
+      product_code: option?.code || product?.code || "",
+      sale_option_id: option?.id || "",
+      sale_option_label: option?.label || "",
+      kit_structure_id: option?.kit_structure_id || "",
+    };
+    const linkedStructure = findBomStructureForSalesItem(draftItem);
+    const bomUnitValue = getBomStructureUnitValue(linkedStructure);
+    const productSalePrice = product ? parseCurrencyInput(product.sale_price || 0) : 0;
+    item.sale_option_id = option?.id || "";
+    item.sale_option_label = option?.label || "";
+    item.kit_structure_id = option?.kit_structure_id || linkedStructure?.id || "";
+    item.production_quantity = option?.production_quantity || "";
+    item.product_code = option?.code || product?.code || "";
+    item.unit_price = option?.price || bomUnitValue || productSalePrice || 0;
+    void renderSalesModulePreservingScroll(index);
     return;
   }
 
   if (field === "unit_price" || field === "discount") {
     item[field] = parseCurrencyInput(event.currentTarget.value);
+    updateSalesDraftAmountDisplays();
+    return;
+  }
+
+  if (field === "quantity") {
+    const wholeQuantity = Math.max(1, Math.round(Number(event.currentTarget.value || 1)));
+    item.quantity = String(wholeQuantity);
+    event.currentTarget.value = String(wholeQuantity);
     updateSalesDraftAmountDisplays();
     return;
   }
@@ -10364,6 +13795,7 @@ function handleSalesItemFieldChange(event) {
 
 function syncSalesDraftFromForm(form) {
   if (!form) return;
+  const paymentConditions = readSalesPaymentConditionsFromForm(form);
 
   state.salesDraft = {
     ...state.salesDraft,
@@ -10374,7 +13806,10 @@ function syncSalesDraftFromForm(form) {
     invoice_number: form.elements.namedItem("invoice_number")?.value || "",
     sale_date: form.elements.namedItem("sale_date")?.value || "",
     delivery_date: form.elements.namedItem("delivery_date")?.value || "",
-    payment_method: form.elements.namedItem("payment_method")?.value || "",
+    delivery_days: form.elements.namedItem("delivery_days")?.value || "",
+    priority: form.elements.namedItem("priority")?.value || "media",
+    payment_method: paymentConditions.find((condition) => condition.method)?.method || form.elements.namedItem("payment_method")?.value || "",
+    payment_conditions: paymentConditions,
     status: form.elements.namedItem("status")?.value || "quote",
     contract_number: form.elements.namedItem("contract_number")?.value || "",
     contract_notes: form.elements.namedItem("contract_notes")?.value || "",
@@ -10383,12 +13818,31 @@ function syncSalesDraftFromForm(form) {
 
   const customer = (state.moduleData.customers || []).find((item) => item.id === state.salesDraft.customer_id);
   state.salesDraft.customer_name = customer?.name || state.salesDraft.customer_name || "";
+  if (state.salesDraft.status === "finalized" && state.salesDraft.sale_date && state.salesDraft.delivery_days) {
+    state.salesDraft.delivery_date = addDaysToIsoDate(state.salesDraft.sale_date, state.salesDraft.delivery_days);
+  }
+}
+
+function readSalesPaymentConditionsFromForm(form) {
+  const rows = Array.from(form.querySelectorAll("[data-sales-payment-row]"));
+  if (!rows.length) return state.salesDraft.payment_conditions || [createEmptySalesPaymentCondition()];
+  return rows.map((row) => createEmptySalesPaymentCondition({
+    id: row.dataset.salesPaymentId || "",
+    method: row.querySelector('[name="sales_payment_method"]')?.value || "",
+    amount: parseCurrencyInput(row.querySelector('[name="sales_payment_amount"]')?.value || 0),
+    percentage: normalizePercentInput(row.querySelector('[name="sales_payment_percentage"]')?.value || 0),
+    installments: Math.max(1, Math.round(Number(row.querySelector('[name="sales_payment_installments"]')?.value || 1))),
+    notes: row.querySelector('[name="sales_payment_notes"]')?.value || "",
+  }));
 }
 
 function hydrateSalesContractDraft(sale) {
   const metadata = getSaleMetadata(sale);
+  const paymentLabel = metadata.paymentConditions?.length
+    ? getSalesPaymentConditionsLabel(metadata.paymentConditions, Math.max(0, Number(metadata.subtotal || 0) - Number(metadata.discount || 0)))
+    : getPaymentMethodLabel(metadata.paymentMethod || "");
   const itemsLabel = (metadata.items || []).length
-    ? metadata.items.map((item) => `${item.product_name || "-"} | Codigo ${item.product_code || "-"} | Qtd ${formatQuantity(item.quantity || 0)} | ${formatCurrency(item.subtotal || ((Number(item.quantity || 0) * Number(item.unit_price || 0)) - Number(item.discount || 0)))}`).join("\n")
+    ? metadata.items.map((item) => `${item.product_name || "-"} | Código ${item.product_code || "-"} | Qtd ${formatWholeQuantity(item.quantity || 0)} | ${formatCurrency(item.subtotal || ((Number(item.quantity || 0) * Number(item.unit_price || 0)) - Number(item.discount || 0)))}`).join("\n")
     : "Sem itens vinculados.";
 
   return {
@@ -10399,7 +13853,7 @@ function hydrateSalesContractDraft(sale) {
     invoice_number: sale.invoice_number || "",
     sale_date: sale.sale_date || "",
     delivery_date: sale.delivery_date || "",
-    payment_method: metadata.paymentMethod || "",
+    payment_method: paymentLabel,
     status: metadata.status || "quote",
     total_amount: metadata.total || 0,
     items_label: itemsLabel,
@@ -10436,7 +13890,7 @@ async function handleSalesContractSubmit(event) {
 
   const sale = (state.moduleData.sales || []).find((item) => item.id === state.salesContractDraft.sale_id);
   if (!sale) {
-    showToast("Venda nao encontrada.", "warning");
+    showToast("Venda não encontrada.", "warning");
     return;
   }
 
@@ -10487,6 +13941,10 @@ function hydrateSalesDraft(sale) {
   const customer = (state.moduleData.customers || []).find((item) =>
     item.id === sale.customer_id || item.name === sale.customer_name
   );
+  const status = metadata.status || "quote";
+  const defaultQuoteDate = new Date().toISOString().slice(0, 10);
+  const saleDate = sale.sale_date || (status === "quote" ? defaultQuoteDate : "");
+  const deliveryDate = sale.delivery_date || (status === "quote" && saleDate ? addFrequency(saleDate, "weekly") : "");
 
   return {
     edit_id: sale.id || "",
@@ -10495,16 +13953,25 @@ function hydrateSalesDraft(sale) {
     cnpj: sale.cnpj || "",
     address: sale.address || "",
     invoice_number: sale.invoice_number || "",
-    sale_date: sale.sale_date || "",
-    delivery_date: sale.delivery_date || "",
+    sale_date: saleDate,
+    delivery_date: deliveryDate,
+    delivery_days: metadata.deliveryDays || "",
+    priority: metadata.priority || "media",
     payment_method: metadata.paymentMethod || "",
-    status: metadata.status || "quote",
+    payment_conditions: metadata.paymentConditions.length
+      ? metadata.paymentConditions
+      : [createEmptySalesPaymentCondition({ method: metadata.paymentMethod || "", amount: metadata.total || metadata.subtotal || "" })],
+    status,
     contract_number: sale.contract_number || metadata.contractNumber || "",
     contract_notes: metadata.notes || "",
     items: metadata.items.length ? metadata.items.map((item) => ({
       product_id: item.product_id || "",
       product_name: item.product_name || "",
       product_code: item.product_code || "",
+      sale_option_id: item.sale_option_id || "",
+      sale_option_label: item.sale_option_label || "",
+      kit_structure_id: item.kit_structure_id || "",
+      production_quantity: item.production_quantity || "",
       quantity: String(item.quantity ?? "1"),
       unit_price: parseCurrencyInput(item.unit_price || 0),
       discount: parseCurrencyInput(item.discount || 0),
@@ -10530,13 +13997,18 @@ async function handleSalesSubmit(event) {
     return;
   }
 
+  if (state.salesDraft.status === "finalized" && (!Number(state.salesDraft.delivery_days) || Number(state.salesDraft.delivery_days) <= 0)) {
+    showToast("Informe o prazo de entrega em dias.", "warning");
+    return;
+  }
+
   if (!state.salesDraft.sale_date || !state.salesDraft.delivery_date) {
-    showToast("Informe data da venda e entrega.", "warning");
+    showToast(state.salesDraft.status === "quote" ? "Informe data do orçamento e validade." : "Informe data da venda e entrega.", "warning");
     return;
   }
 
   if (new Date(`${state.salesDraft.delivery_date}T00:00:00`) < new Date(`${state.salesDraft.sale_date}T00:00:00`)) {
-    showToast("A entrega nao pode ser anterior a data da venda.", "warning");
+    showToast(state.salesDraft.status === "quote" ? "A validade não pode ser anterior à data do orçamento." : "A entrega não pode ser anterior à data da venda.", "warning");
     return;
   }
 
@@ -10546,26 +14018,30 @@ async function handleSalesSubmit(event) {
     return;
   }
 
-  if (state.salesDraft.status === "finalized" && !state.salesDraft.invoice_number.trim()) {
-    showToast("Numero da nota fiscal obrigatorio para venda finalizada.", "warning");
-    return;
-  }
-
-  const totals = calculateSalesTotals(normalizedItems);
+  const baseTotals = calculateSalesTotals(normalizedItems);
+  const paymentConditions = normalizeSalesPaymentConditions(state.salesDraft.payment_conditions, baseTotals.total);
+  const totals = calculateSalesGrandTotals(normalizedItems, paymentConditions);
+  const operationalNotes = [
+    state.salesDraft.status === "finalized" && state.salesDraft.delivery_days ? `[meta:delivery_days]${state.salesDraft.delivery_days}` : "",
+    `[meta:payment_conditions]${JSON.stringify(paymentConditions)}`,
+    state.salesDraft.contract_notes.trim() || "",
+  ].filter(Boolean).join("\n");
   const payload = {
     customer_id: customer.id,
     customer_name: customer.name,
     cnpj: state.salesDraft.cnpj || getCustomerMetadata(customer).document || "",
     address: state.salesDraft.address || getCustomerMetadata(customer).address || "",
-    invoice_number: state.salesDraft.status === "quote" ? state.salesDraft.invoice_number.trim() : state.salesDraft.invoice_number.trim(),
+    invoice_number: state.salesDraft.invoice_number.trim(),
     contract_number: (
       state.salesDraft.contract_number.trim()
       || null
     ) || null,
-    contract_notes: state.salesDraft.contract_notes.trim() || null,
+    contract_notes: operationalNotes || null,
     sale_date: state.salesDraft.sale_date,
     delivery_date: state.salesDraft.delivery_date,
-    payment_method: state.salesDraft.payment_method || null,
+    delivery_days: state.salesDraft.status === "finalized" ? state.salesDraft.delivery_days : "",
+    priority: state.salesDraft.priority || "media",
+    payment_method: paymentConditions[0]?.method || state.salesDraft.payment_method || null,
     status: state.salesDraft.status,
     sale_items: normalizedItems,
     subtotal_amount: totals.subtotal,
@@ -10578,44 +14054,142 @@ async function handleSalesSubmit(event) {
   try {
     const isEditing = Boolean(state.salesDraft.edit_id);
     const savedSale = await persistSale(payload, state.salesDraft.edit_id);
-    const saleWithProduction = await ensureProductionForSale(savedSale, payload);
-    await loadTable("sales", "sales");
-    await loadTable("production_orders", "production");
+    let productionResult = { generatedNow: false };
+    if (shouldAskToSendSaleToProduction(savedSale, payload)) {
+      const shouldSendToProduction = await confirmSendSaleToProduction();
+      if (shouldSendToProduction) {
+        productionResult = await ensureProductionForSale(savedSale, payload);
+      }
+    }
+    if (productionResult.generatedNow) {
+      savedSale.production_generated = true;
+      savedSale.production_order_ids = productionResult.orderIds || [];
+    }
+    upsertModuleRecord("sales", savedSale);
+    if (productionResult.generatedNow) {
+      await loadTable("production_orders", "production");
+    }
     resetSalesFormState();
     renderActiveModule();
     void queueSystemLog({
       moduleKey: "sales",
       action: isEditing ? "edicao" : "criacao",
       level: "Informativo",
-      itemAffected: saleWithProduction.sale_number || savedSale.id,
-      description: `Venda/orcamento ${isEditing ? "atualizado" : "cadastrado"} para ${payload.customer_name}.`,
+      itemAffected: savedSale.sale_number || savedSale.id,
+      description: `Venda/orçamento ${isEditing ? "atualizado" : "cadastrado"} para ${payload.customer_name}.`,
       entityType: "sale",
       entityId: savedSale.id,
       payload: {
         status: payload.status,
         total_amount: payload.total_amount,
         customer_name: payload.customer_name,
-        production_generated: saleWithProduction.generatedNow || payload.production_generated,
+        production_generated: productionResult.generatedNow || payload.production_generated,
       },
     });
-    showToast(saleWithProduction.generatedNow ? "Venda salva e enviada para producao." : "Venda salva com sucesso.", "success");
+    showToast(
+      payload.status === "quote"
+        ? "Orçamento salvo com sucesso."
+        : productionResult.generatedNow
+          ? "Venda salva e enviada para produção."
+          : "Venda salva com sucesso.",
+      "success"
+    );
   } catch (error) {
     showToast(formatError(error), "danger");
   }
+}
+
+function shouldAskToSendSaleToProduction(savedSale, payload) {
+  const metadata = getSaleMetadata(savedSale || {});
+  return (payload.status === "finalized" || metadata.status === "finalized")
+    && !payload.production_generated
+    && !metadata.productionGenerated
+    && !(payload.production_order_ids || []).length
+    && !(metadata.productionOrderIds || []).length;
+}
+
+function confirmSendSaleToProduction() {
+  const existing = document.querySelector("[data-sales-production-confirm-overlay]");
+  if (existing) existing.remove();
+
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay sales-document-modal-overlay";
+    overlay.setAttribute("data-sales-production-confirm-overlay", "true");
+    overlay.innerHTML = `
+      <div class="modal-card sales-document-modal" role="dialog" aria-modal="true" aria-label="Enviar venda para produção">
+        <div class="sales-config-header">
+          <div>
+            <p class="eyebrow muted">Vendas</p>
+            <h3>Enviar para a Produção?</h3>
+            <p class="muted">A venda foi salva como aprovada. Você pode gerar a ordem de produção agora ou deixar para enviar depois pelas ações da venda.</p>
+          </div>
+        </div>
+        <div class="form-actions-row sales-form-actions">
+          <button class="ghost-button" type="button" data-sales-production-confirm="no">Não no momento</button>
+          <button class="primary-button" type="button" data-sales-production-confirm="yes">Sim</button>
+        </div>
+      </div>
+    `;
+
+    const close = (value) => {
+      overlay.remove();
+      resolve(value);
+    };
+
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) close(false);
+      const action = event.target?.dataset?.salesProductionConfirm;
+      if (action === "yes") close(true);
+      if (action === "no") close(false);
+    });
+
+    document.body.appendChild(overlay);
+    overlay.querySelector('[data-sales-production-confirm="yes"]')?.focus();
+  });
 }
 
 function normalizeSalesItems(items) {
   return (items || [])
     .map((item) => {
       const product = (state.moduleData.products || []).find((productItem) => productItem.id === item.product_id)
-        || (state.moduleData.products || []).find((productItem) => productItem.code === item.product_code);
+        || (state.moduleData.products || []).find((productItem) =>
+          productItem.code === item.product_code
+          || normalizeProductSaleOptions(productItem).some((option) => option.code === item.product_code)
+        );
+      const option = item.sale_option_id ? findProductSaleOption(product, item.sale_option_id) : null;
+      const linkedStructure = findBomStructureForSalesItem({
+        ...item,
+        product_id: item.product_id || product?.id || "",
+        product_name: item.product_name || product?.name || "",
+        product_code: item.product_code || option?.code || product?.code || "",
+        sale_option_id: item.sale_option_id || option?.id || "",
+        sale_option_label: item.sale_option_label || option?.label || "",
+        kit_structure_id: item.kit_structure_id || option?.kit_structure_id || "",
+      });
+      const bomComponents = getSalesItemBomComponents({
+        ...item,
+        product_id: item.product_id || product?.id || "",
+        product_name: item.product_name || product?.name || "",
+        product_code: item.product_code || option?.code || product?.code || "",
+        sale_option_id: item.sale_option_id || option?.id || "",
+        sale_option_label: item.sale_option_label || option?.label || "",
+        kit_structure_id: item.kit_structure_id || option?.kit_structure_id || linkedStructure?.id || "",
+      });
+      const bomUnitValue = getBomStructureUnitValue(linkedStructure);
+      const hasUnitPrice = item.unit_price !== "" && item.unit_price !== null && item.unit_price !== undefined;
       return {
         product_id: item.product_id || product?.id || null,
         product_name: item.product_name || product?.name || "",
-        product_code: item.product_code || product?.code || "",
-        quantity: Number(item.quantity || 0),
-        unit_price: Number(item.unit_price || 0),
+        product_code: item.product_code || option?.code || product?.code || "",
+        sale_option_id: item.sale_option_id || "",
+        sale_option_label: item.sale_option_label || option?.label || "",
+        kit_structure_id: item.kit_structure_id || option?.kit_structure_id || linkedStructure?.id || "",
+        production_quantity: normalizeWholeNumber(item.production_quantity || option?.production_quantity || 0, { min: 0, fallback: 0 }),
+        quantity: normalizeWholeNumber(item.quantity || 0, { min: 0, fallback: 0 }),
+        unit_price: hasUnitPrice ? Number(item.unit_price || 0) : Number(option?.price || bomUnitValue || parseCurrencyInput(product?.sale_price || 0) || 0),
         discount: Number(item.discount || 0),
+        bom_components: bomComponents,
       };
     })
     .filter((item) => item.product_name && item.quantity > 0)
@@ -10635,8 +14209,150 @@ function calculateSalesTotals(items) {
   };
 }
 
+function getSalesPixDiscountPercent() {
+  return normalizePercentInput(state.salesDocumentSettings?.commercial?.pix_discount_percent || 0);
+}
+
+function normalizeSalesPaymentConditions(conditions, totalBeforePaymentDiscount = 0) {
+  const source = Array.isArray(conditions) && conditions.length
+    ? conditions
+    : [createEmptySalesPaymentCondition()];
+  const prepared = source.map((condition) => {
+    const method = String(condition.method || "").trim();
+    const explicitAmount = parseCurrencyInput(condition.amount);
+    const legacyPercentage = normalizePercentInput(condition.percentage, 0);
+    const amount = explicitAmount > 0
+      ? explicitAmount
+      : totalBeforePaymentDiscount * (legacyPercentage / 100);
+    const percentage = totalBeforePaymentDiscount > 0
+      ? (amount / totalBeforePaymentDiscount) * 100
+      : legacyPercentage;
+    const installments = Math.max(1, Math.round(Number(condition.installments || 1)));
+    return {
+      id: condition.id || `payment-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+      method,
+      percentage: Math.max(0, percentage),
+      installments,
+      notes: String(condition.notes || "").trim(),
+      amount,
+      hasManualAmount: explicitAmount > 0 || legacyPercentage > 0,
+    };
+  });
+  const filtered = prepared.filter((condition) => condition.method || condition.amount > 0 || condition.notes);
+  const automaticConditions = filtered.filter((condition) => !condition.hasManualAmount && condition.method);
+  if (automaticConditions.length && totalBeforePaymentDiscount > 0) {
+    const manualTotal = filtered
+      .filter((condition) => condition.hasManualAmount)
+      .reduce((sum, condition) => sum + Number(condition.amount || 0), 0);
+    const automaticAmount = Math.max(0, totalBeforePaymentDiscount - manualTotal) / automaticConditions.length;
+    automaticConditions.forEach((condition) => {
+      condition.amount = automaticAmount;
+      condition.percentage = totalBeforePaymentDiscount > 0
+        ? (automaticAmount / totalBeforePaymentDiscount) * 100
+        : 0;
+    });
+  }
+  return filtered
+    .map((condition) => {
+      const method = String(condition.method || "").trim();
+      const amount = parseCurrencyInput(condition.amount);
+      const percentage = totalBeforePaymentDiscount > 0
+        ? (amount / totalBeforePaymentDiscount) * 100
+        : normalizePercentInput(condition.percentage, 0);
+      const installments = Math.max(1, Math.round(Number(condition.installments || 1)));
+      return {
+        id: condition.id,
+        method,
+        percentage: Math.max(0, percentage),
+        installments,
+        notes: String(condition.notes || "").trim(),
+        amount,
+      };
+    });
+}
+
+function getSalesPaymentConditionsForDisplay(conditions, totalBeforePaymentDiscount = 0) {
+  const source = Array.isArray(conditions) && conditions.length
+    ? conditions
+    : [createEmptySalesPaymentCondition()];
+  const prepared = source.map((condition) => {
+    const explicitAmount = parseCurrencyInput(condition.amount);
+    const legacyPercentage = normalizePercentInput(condition.percentage, 0);
+    const amount = explicitAmount > 0
+      ? explicitAmount
+      : totalBeforePaymentDiscount * (legacyPercentage / 100);
+    return {
+      id: condition.id || `payment-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+      method: String(condition.method || "").trim(),
+      percentage: totalBeforePaymentDiscount > 0 ? (amount / totalBeforePaymentDiscount) * 100 : legacyPercentage,
+      installments: Math.max(1, Math.round(Number(condition.installments || 1))),
+      notes: String(condition.notes || "").trim(),
+      amount,
+      hasManualAmount: explicitAmount > 0 || legacyPercentage > 0,
+    };
+  });
+  const automaticConditions = prepared.filter((condition) => !condition.hasManualAmount && condition.method);
+  if (automaticConditions.length && totalBeforePaymentDiscount > 0) {
+    const manualTotal = prepared
+      .filter((condition) => condition.hasManualAmount)
+      .reduce((sum, condition) => sum + Number(condition.amount || 0), 0);
+    const automaticAmount = Math.max(0, totalBeforePaymentDiscount - manualTotal) / automaticConditions.length;
+    automaticConditions.forEach((condition) => {
+      condition.amount = automaticAmount;
+      condition.percentage = totalBeforePaymentDiscount > 0 ? (automaticAmount / totalBeforePaymentDiscount) * 100 : 0;
+    });
+  } else if (prepared.length === 1 && !prepared[0].hasManualAmount && totalBeforePaymentDiscount > 0) {
+    prepared[0].amount = totalBeforePaymentDiscount;
+    prepared[0].percentage = 100;
+  }
+  return prepared.map(({ hasManualAmount, ...condition }) => condition);
+}
+
+function calculateSalesPaymentAdjustment(conditions, totalBeforePaymentDiscount) {
+  const pixPercent = getSalesPixDiscountPercent();
+  if (!pixPercent || !totalBeforePaymentDiscount) return 0;
+  return normalizeSalesPaymentConditions(conditions, totalBeforePaymentDiscount)
+    .filter((condition) => condition.method === "pix")
+    .reduce((sum, condition) => sum + (condition.amount * pixPercent / 100), 0);
+}
+
+function calculateSalesGrandTotals(items, conditions = []) {
+  const totals = calculateSalesTotals(items);
+  const paymentDiscount = calculateSalesPaymentAdjustment(conditions, totals.total);
+  return {
+    ...totals,
+    paymentDiscount,
+    discount: totals.discount + paymentDiscount,
+    total: totals.total - paymentDiscount,
+    itemDiscount: totals.discount,
+  };
+}
+
+function getSalesPaymentConditionsLabel(conditions, totalBeforePaymentDiscount = 0) {
+  const normalized = normalizeSalesPaymentConditions(conditions, totalBeforePaymentDiscount);
+  if (!normalized.length) return "Conforme negociado.";
+  const pixPercent = getSalesPixDiscountPercent();
+  const lines = normalized.map((condition) => {
+    const methodLabel = getPaymentMethodLabel(condition.method) || "Forma não informada";
+    const installmentValue = condition.installments > 1 ? condition.amount / condition.installments : 0;
+    const installmentLabel = condition.installments > 1
+      ? ` em ${condition.installments}x de ${formatCurrency(installmentValue)}`
+      : "";
+    return `${formatCurrency(condition.amount)} via ${methodLabel}${installmentLabel}${condition.notes ? ` - ${condition.notes}` : ""}`;
+  });
+  const hasPix = normalized.some((condition) => condition.method === "pix");
+  if (hasPix && pixPercent) {
+    lines.push("Desconto automático Pix aplicado sobre a parte paga via Pix.");
+  }
+  return lines.join("\n");
+}
+
+function formatPercent(value) {
+  return `${new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(Number(value || 0))}%`;
+}
+
 function getSalesDraftTotals() {
-  return calculateSalesTotals(normalizeSalesItems(state.salesDraft.items || []));
+  return calculateSalesGrandTotals(normalizeSalesItems(state.salesDraft.items || []), state.salesDraft.payment_conditions || []);
 }
 
 function updateSalesDraftAmountDisplays() {
@@ -10653,19 +14369,34 @@ function updateSalesDraftAmountDisplays() {
     const totalType = element.dataset.salesTotal;
     element.textContent = formatCurrency(totals[totalType] || 0);
   });
+
+  const baseTotal = Math.max(0, Number(totals.subtotal || 0) - Number(totals.itemDiscount || 0));
+  const paymentConditions = getSalesPaymentConditionsForDisplay(state.salesDraft.payment_conditions || [], baseTotal);
+  document.querySelectorAll("[data-sales-payment-subtotal]").forEach((element) => {
+    const condition = paymentConditions[Number(element.dataset.salesPaymentSubtotal)] || {};
+    element.textContent = formatCurrency(condition.amount || 0);
+  });
+  document.querySelectorAll("[data-sales-payment-installment-value]").forEach((element) => {
+    const condition = paymentConditions[Number(element.dataset.salesPaymentInstallmentValue)] || {};
+    element.textContent = condition.installments > 1
+      ? `${condition.installments}x de ${formatCurrency((condition.amount || 0) / condition.installments)}`
+      : "Parcela única";
+  });
 }
 
 async function persistSale(payload, editId) {
   const dbPayload = {
-    customer_id: payload.customer_id,
+    customer_id: payload.customer_id || null,
     customer_name: payload.customer_name,
     cnpj: payload.cnpj,
     address: payload.address,
-    invoice_number: payload.invoice_number,
+    invoice_number: payload.invoice_number || null,
     contract_notes: payload.contract_notes,
     sale_date: payload.sale_date,
     delivery_date: payload.delivery_date,
-    payment_method: payload.payment_method,
+    priority: payload.priority || "media",
+    delivery_days: payload.delivery_days || null,
+    payment_method: payload.payment_method || null,
     status: payload.status,
     sale_items: payload.sale_items,
     subtotal_amount: payload.subtotal_amount,
@@ -10686,6 +14417,18 @@ async function persistSale(payload, editId) {
   if (!error) return data;
   if (!isSalesSchemaCompatibilityError(error)) {
     throw error;
+  }
+
+  const compatiblePayload = { ...dbPayload };
+  delete compatiblePayload.priority;
+  delete compatiblePayload.delivery_days;
+  const compatibleQuery = editId
+    ? state.supabase.from("sales").update(compatiblePayload).eq("id", editId).select().single()
+    : state.supabase.from("sales").insert(compatiblePayload).select().single();
+  const { data: compatibleData, error: compatibleError } = await compatibleQuery;
+  if (!compatibleError) return compatibleData;
+  if (!isSalesSchemaCompatibilityError(compatibleError)) {
+    throw compatibleError;
   }
 
   const legacyPayload = {
@@ -10712,7 +14455,9 @@ function buildLegacySaleNotes(payload) {
   return [
     `[meta:status]${payload.status}`,
     payload.payment_method ? `[meta:payment]${payload.payment_method}` : "",
+    payload.priority ? `[meta:priority]${payload.priority}` : "",
     payload.contract_number && payload.contract_number !== "AUTO" ? `[meta:contract_number]${payload.contract_number}` : "",
+    payload.delivery_days ? `[meta:delivery_days]${payload.delivery_days}` : "",
     `[meta:subtotal]${payload.subtotal_amount}`,
     `[meta:discount]${payload.discount_amount}`,
     `[meta:total]${payload.total_amount}`,
@@ -10731,7 +14476,10 @@ function getSaleMetadata(sale) {
     saleSequence: Number(sale.sale_sequence || 0),
     saleYear: Number(sale.sale_year || 0),
     saleNumber: sale.sale_number || "",
+    priority: sale.priority || "media",
     paymentMethod: sale.payment_method || "",
+    paymentConditions: [],
+    deliveryDays: sale.delivery_days || "",
     subtotal: Number(sale.subtotal_amount || 0),
     discount: Number(sale.discount_amount || 0),
     total: Number(sale.total_amount || 0),
@@ -10748,6 +14496,11 @@ function getSaleMetadata(sale) {
   rawNotes.split("\n").forEach((line) => {
     if (line.startsWith("[meta:status]") && !sale.status) metadata.status = line.replace("[meta:status]", "").trim();
     else if (line.startsWith("[meta:payment]") && !sale.payment_method) metadata.paymentMethod = line.replace("[meta:payment]", "").trim();
+    else if (line.startsWith("[meta:payment_conditions]")) {
+      try { metadata.paymentConditions = normalizeSalesPaymentConditions(JSON.parse(line.replace("[meta:payment_conditions]", "").trim()), metadata.total || metadata.subtotal || 0); } catch {}
+    }
+    else if (line.startsWith("[meta:priority]") && !sale.priority) metadata.priority = line.replace("[meta:priority]", "").trim() || "media";
+    else if (line.startsWith("[meta:delivery_days]")) metadata.deliveryDays = line.replace("[meta:delivery_days]", "").trim();
     else if (line.startsWith("[meta:contract_number]") && !sale.contract_number) metadata.contractNumber = line.replace("[meta:contract_number]", "").trim();
     else if (line.startsWith("[meta:subtotal]") && !sale.subtotal_amount) metadata.subtotal = Number(line.replace("[meta:subtotal]", "").trim() || 0);
     else if (line.startsWith("[meta:discount]") && !sale.discount_amount) metadata.discount = Number(line.replace("[meta:discount]", "").trim() || 0);
@@ -10767,13 +14520,285 @@ function getSaleMetadata(sale) {
     .trim();
 
   if (!metadata.total && metadata.items.length) {
-    const totals = calculateSalesTotals(metadata.items);
+    const totals = metadata.paymentConditions.length
+      ? calculateSalesGrandTotals(metadata.items, metadata.paymentConditions)
+      : calculateSalesTotals(metadata.items);
     metadata.subtotal = totals.subtotal;
     metadata.discount = totals.discount;
     metadata.total = totals.total;
   }
-  metadata.statusLabel = metadata.status === "finalized" ? "Venda Finalizada" : "Orcamento";
+  metadata.statusLabel = metadata.status === "finalized" ? "Venda Finalizada" : "Orçamento";
   return metadata;
+}
+
+function buildDefaultProductionOperationSteps() {
+  const now = Date.now();
+  return getProductionOperationStepTemplate().map((step, index) => ({
+    id: `op-step-${now}-${index + 1}`,
+    name: step.name,
+    sequence: index + 1,
+    status: index === 0 ? "pending" : "locked",
+    operator: "",
+    started_at: "",
+    completed_at: "",
+    elapsed_minutes: 0,
+    estimated_minutes: step.estimated_minutes,
+    notes: "",
+    defects: 0,
+    rework: 0,
+  }));
+}
+
+function normalizeProductionOperationStepTemplate(input = []) {
+  const rows = Array.isArray(input) ? input : [];
+  return rows
+    .map((step, index) => ({
+      name: String(step?.name || "").trim() || `Etapa ${index + 1}`,
+      estimated_minutes: Math.max(0, Math.round(Number(step?.estimated_minutes || 0))),
+      sequence: Math.max(1, Math.round(Number(step?.sequence || index + 1))),
+    }))
+    .filter((step) => step.name)
+    .sort((a, b) => a.sequence - b.sequence)
+    .map((step, index) => ({
+      name: step.name,
+      estimated_minutes: step.estimated_minutes,
+      sequence: index + 1,
+    }));
+}
+
+function getProductionOperationStepTemplate() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(PRODUCTION_OPERATION_CONFIG_STORAGE_KEY) || "[]");
+    const normalized = normalizeProductionOperationStepTemplate(stored);
+    if (normalized.length) return normalized;
+  } catch {}
+
+  return normalizeProductionOperationStepTemplate(DEFAULT_PRODUCTION_OPERATION_STEPS);
+}
+
+function saveProductionOperationSettingsCache(settings) {
+  const normalized = normalizeProductionOperationStepTemplate(settings);
+  if (normalized.length) {
+    localStorage.setItem(PRODUCTION_OPERATION_CONFIG_STORAGE_KEY, JSON.stringify(normalized));
+  } else {
+    localStorage.removeItem(PRODUCTION_OPERATION_CONFIG_STORAGE_KEY);
+  }
+  state.productionOperationConfigDraft = createProductionOperationConfigDraft();
+}
+
+async function loadProductionOperationSettingsFromServer() {
+  if (!state.supabase || !state.accessToken) return;
+
+  try {
+    const { data, error } = await state.supabase.rpc("get_production_operation_settings", {
+      p_access_token: state.accessToken,
+    });
+    if (error) throw error;
+    if (Array.isArray(data)) {
+      saveProductionOperationSettingsCache(data);
+    }
+  } catch (error) {
+    if (isAuthenticationError(error)) {
+      throw error;
+    }
+    console.error("production operation settings load", error);
+  }
+}
+
+async function persistProductionOperationSettings(settings) {
+  const normalized = normalizeProductionOperationStepTemplate(settings);
+  saveProductionOperationSettingsCache(normalized);
+
+  if (!state.supabase || !state.accessToken) return normalized;
+
+  const { error } = await state.supabase.rpc("save_production_operation_settings", {
+    p_access_token: state.accessToken,
+    p_settings: normalized,
+  });
+  if (error) throw error;
+  return normalized;
+}
+
+function createProductionOperationConfigDraft() {
+  return {
+    steps: getProductionOperationStepTemplate().map((step, index) => ({
+      id: `config-step-${Date.now()}-${index + 1}`,
+      name: step.name,
+      estimated_minutes: String(step.estimated_minutes || 0),
+      sequence: String(index + 1),
+    })),
+  };
+}
+
+function resetProductionOperationConfigDraft() {
+  state.productionOperationConfigDraft = createProductionOperationConfigDraft();
+}
+
+function syncProductionOperationConfigDraftFromForm(form) {
+  if (!form) return;
+
+  state.productionOperationConfigDraft = {
+    steps: Array.from(form.querySelectorAll("[data-production-config-step-row]")).map((row, index) => ({
+      id: row.dataset.productionConfigStepRow || `config-step-${Date.now()}-${index + 1}`,
+      name: row.querySelector('[name="operation_name"]')?.value || "",
+      estimated_minutes: row.querySelector('[name="operation_minutes"]')?.value || "",
+      sequence: row.querySelector('[name="operation_sequence"]')?.value || String(index + 1),
+    })),
+  };
+}
+
+function addProductionOperationConfigStep() {
+  state.productionOperationConfigDraft.steps.push({
+    id: `config-step-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    name: "",
+    estimated_minutes: "0",
+    sequence: String(state.productionOperationConfigDraft.steps.length + 1),
+  });
+}
+
+function removeProductionOperationConfigStep(stepId) {
+  const nextSteps = state.productionOperationConfigDraft.steps.filter((step) => step.id !== stepId);
+  state.productionOperationConfigDraft.steps = (nextSteps.length ? nextSteps : [{
+    id: `config-step-${Date.now()}`,
+    name: "",
+    estimated_minutes: "0",
+    sequence: "1",
+  }]).map((step, index) => ({ ...step, sequence: String(index + 1) }));
+}
+
+function restoreDefaultProductionOperationConfig() {
+  localStorage.removeItem(PRODUCTION_OPERATION_CONFIG_STORAGE_KEY);
+  state.productionOperationConfigDraft = createProductionOperationConfigDraft();
+}
+
+async function handleProductionOperationConfigSubmit(event) {
+  event.preventDefault();
+
+  if (!isPermissionsAdmin()) {
+    showToast("Somente TI e ADMINISTRADOR podem alterar a configuração da produção.", "warning");
+    return;
+  }
+
+  const form = event.currentTarget;
+  syncProductionOperationConfigDraftFromForm(form);
+  const normalized = normalizeProductionOperationStepTemplate(state.productionOperationConfigDraft.steps);
+
+  if (!normalized.length) {
+    showToast("Cadastre ao menos uma etapa da produção.", "warning");
+    return;
+  }
+  if (normalized.some((step) => !step.name)) {
+    showToast("Informe o nome de todas as etapas.", "warning");
+    return;
+  }
+  if (normalized.some((step) => Number.isNaN(Number(step.estimated_minutes)))) {
+    showToast("O tempo de cada etapa deve ser numérico.", "warning");
+    return;
+  }
+
+  try {
+    await persistProductionOperationSettings(normalized);
+    state.productionOperationConfigDraft = createProductionOperationConfigDraft();
+    state.openAccordionKey = null;
+    renderActiveModule();
+    void queueSystemLog({
+      moduleKey: "production",
+      action: "configuracao_etapas",
+      level: "Atenção",
+      itemAffected: "Resumo da operação",
+      description: "Configuração padrão das etapas da produção alterada.",
+      entityType: "production_operation_config",
+      entityId: "default",
+      payload: { steps: normalized },
+    });
+    showToast("Configuração das etapas salva.", "success");
+  } catch (error) {
+    showToast(formatError(error), "danger");
+  }
+}
+
+function buildProductionTimelineEntry({ type = "event", title, description = "", tone = "notified", operator = "" }) {
+  return {
+    id: `op-log-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    type,
+    title,
+    description,
+    tone,
+    operator: operator || getLoggedUserName("Sistema"),
+    created_at: new Date().toISOString(),
+  };
+}
+
+function buildProductionInitialAttachments(payload, savedSale) {
+  return [
+    payload.contract_number || savedSale.contract_number
+      ? {
+        id: `op-att-contract-${savedSale.id || Date.now()}`,
+        type: "contract",
+        name: `Contrato ${payload.contract_number || savedSale.contract_number}`,
+        status: "Vinculado",
+        created_at: new Date().toISOString(),
+      }
+      : null,
+    {
+      id: `op-att-sale-${savedSale.id || Date.now()}`,
+      type: "sale",
+      name: `Venda ${savedSale.sale_number || savedSale.id || "-"}`,
+      status: "Vinculada",
+      created_at: new Date().toISOString(),
+    },
+  ].filter(Boolean);
+}
+
+function buildProductionMaterialPlan(productionItems = []) {
+  return productionItems.flatMap((item) => {
+    const components = Array.isArray(item.bom_components) ? item.bom_components : [];
+    if (!components.length) {
+      return [{
+        id: `plan-${item.product_id || item.product_code || item.product_name || Date.now()}`,
+        code: item.product_code || "",
+        name: item.productionLabel || item.product_name || "Produto",
+        type: "produto",
+        required_quantity: Number(item.batchSize || item.quantity || 0),
+        available_quantity: 0,
+        missing_quantity: 0,
+        unit: "un",
+        status: "planejado",
+      }];
+    }
+    return components.map((component, index) => ({
+      id: `plan-${item.product_id || item.product_code || "item"}-${component.id || component.code || index}`,
+      code: component.code || "",
+      name: component.name || component.component_name || "Componente",
+      type: component.type || "bom",
+      required_quantity: Number(component.quantity || component.quantity_required || 0) * Number(item.quantity || 1),
+      available_quantity: Number(component.current_stock || 0),
+      missing_quantity: Math.max((Number(component.quantity || component.quantity_required || 0) * Number(item.quantity || 1)) - Number(component.current_stock || 0), 0),
+      unit: component.unit || "un",
+      status: Number(component.current_stock || 0) > 0 ? "disponivel" : "verificar",
+    }));
+  });
+}
+
+function buildProductionInitialAlerts(productionItems = []) {
+  const materialPlan = buildProductionMaterialPlan(productionItems);
+  return materialPlan
+    .filter((item) => Number(item.missing_quantity || 0) > 0)
+    .slice(0, 8)
+    .map((item) => ({
+      id: `op-alert-${item.id}`,
+      type: "material_shortage",
+      level: "warning",
+      title: "Falta de material",
+      description: `${item.name}: faltam ${formatQuantity(item.missing_quantity)} ${item.unit || ""}`.trim(),
+      created_at: new Date().toISOString(),
+    }));
+}
+
+function showProductionNotification(message, type = "notified") {
+  const toastType = type === "danger" ? "danger" : type === "warning" ? "warning" : "success";
+  showToast(message, toastType);
+  playNotificationSound(type);
 }
 
 function isSalesSchemaCompatibilityError(error) {
@@ -10781,18 +14806,18 @@ function isSalesSchemaCompatibilityError(error) {
 }
 
 function saleStatusCell(status) {
-  return `<span class="status-chip ${status === "finalized" ? "status-completed" : "status-quote"}">${status === "finalized" ? "Venda Finalizada" : "Orcamento"}</span>`;
+  return `<span class="status-chip ${status === "finalized" ? "status-completed" : "status-quote"}">${status === "finalized" ? "Venda Finalizada" : "Orçamento"}</span>`;
 }
 
 function getPaymentMethodLabel(value) {
   const labels = {
     boleto: "Boleto",
     pix: "Pix",
-    transferencia: "Transferencia",
-    cartao: "Cartao",
+    transferencia: "Transferência",
+    cartao: "Cartão",
     dinheiro: "Dinheiro",
     cheque: "Cheque",
-    negociado_com_o_dono: "Negociado com o dono",
+    negociado_com_o_dono: "Negociado",
   };
   return labels[value] || "-";
 }
@@ -10809,6 +14834,8 @@ async function finalizeSaleRecord(sale) {
     contract_notes: metadata.notes || null,
     sale_date: sale.sale_date,
     delivery_date: sale.delivery_date,
+    delivery_days: metadata.deliveryDays || sale.delivery_days || "",
+    priority: metadata.priority || "media",
     payment_method: metadata.paymentMethod || null,
     status: "finalized",
     sale_items: metadata.items,
@@ -10822,6 +14849,68 @@ async function finalizeSaleRecord(sale) {
   return ensureProductionForSale(saved, payload);
 }
 
+function buildSaleProductionPayload(sale) {
+  const metadata = getSaleMetadata(sale);
+  return {
+    customer_id: sale.customer_id || null,
+    customer_name: sale.customer_name,
+    cnpj: sale.cnpj,
+    address: sale.address,
+    invoice_number: sale.invoice_number || null,
+    contract_number: sale.contract_number || metadata.contractNumber || null,
+    contract_notes: metadata.notes || null,
+    sale_date: sale.sale_date,
+    delivery_date: sale.delivery_date,
+    delivery_days: metadata.deliveryDays || sale.delivery_days || "",
+    priority: metadata.priority || "media",
+    payment_method: metadata.paymentMethod || null,
+    status: metadata.status || "finalized",
+    sale_items: metadata.items,
+    subtotal_amount: metadata.subtotal,
+    discount_amount: metadata.discount,
+    total_amount: metadata.total,
+    production_generated: metadata.productionGenerated,
+    production_order_ids: metadata.productionOrderIds,
+  };
+}
+
+async function sendSaleToProduction(sale) {
+  const metadata = getSaleMetadata(sale);
+  if (metadata.status !== "finalized") {
+    showToast("Apenas vendas aprovadas podem ser enviadas para produção.", "warning");
+    return { generatedNow: false };
+  }
+  if (metadata.productionGenerated || (metadata.productionOrderIds || []).length) {
+    showToast("Esta venda já foi enviada para produção.", "warning");
+    return { generatedNow: false };
+  }
+
+  try {
+    const result = await ensureProductionForSale(sale, buildSaleProductionPayload(sale));
+    if (result.generatedNow) {
+      upsertModuleRecord("sales", {
+        ...sale,
+        production_generated: true,
+        production_order_ids: result.orderIds || [],
+      });
+    }
+    if (result.generatedNow) {
+      await loadTable("production_orders", "production");
+    }
+    renderActiveModule();
+    showToast(
+      result.generatedNow
+        ? "Venda enviada para produção."
+        : "Não foi possível gerar produção para esta venda.",
+      result.generatedNow ? "success" : "warning"
+    );
+    return result;
+  } catch (error) {
+    showToast(formatError(error), "danger");
+    return { generatedNow: false };
+  }
+}
+
 async function ensureProductionForSale(savedSale, payload) {
   const saleMetadata = getSaleMetadata(savedSale);
   if (payload.status !== "finalized" && saleMetadata.status !== "finalized") {
@@ -10831,38 +14920,80 @@ async function ensureProductionForSale(savedSale, payload) {
     return { generatedNow: false };
   }
 
-  const orderIds = [];
-  for (const item of payload.sale_items || []) {
+  const productionItems = (payload.sale_items || []).map((item) => {
     const linkedProduct = (state.moduleData.products || []).find((product) =>
       product.id === item.product_id || product.code === item.product_code
     );
-    const productionPayload = {
-      order_number: generateProductionOrderNumber({ code: item.product_code || "VENDA" }),
-      product_id: item.product_id || null,
-      product_code: item.product_code || null,
-      product_name: item.product_name,
-      batch_size: item.quantity,
-      priority: "media",
-      status: "planned",
-      planned_start: payload.sale_date,
-      planned_end: payload.delivery_date,
-      lot_number: linkedProduct?.batch || null,
-      responsible_name: payload.customer_name,
-      notes: [
-        `Gerada pela Venda ${savedSale.sale_number || savedSale.id}`,
-        payload.contract_number ? `Contrato ${payload.contract_number}` : "",
-        payload.contract_notes || "",
-      ].filter(Boolean).join(" | "),
-      sale_id: savedSale.id,
-      sale_number: savedSale.sale_number || null,
-      customer_name: payload.customer_name,
-      origin: "sale_finalized",
+    const optionLabel = item.sale_option_label || "";
+    const productionQuantity = Number(item.production_quantity || 0);
+    const batchSize = productionQuantity > 0 ? Number(item.quantity || 0) * productionQuantity : item.quantity;
+    return {
+      ...item,
+      linkedProduct,
+      optionLabel,
+      productionQuantity,
+      batchSize: Number(batchSize || 0),
+      productionLabel: optionLabel ? `${item.product_name} - ${optionLabel}` : item.product_name,
     };
-    const productionOrder = await persistProductionOrder(productionPayload, null);
-    if (productionOrder?.id) {
-      orderIds.push(productionOrder.id);
-    }
+  }).filter((item) => item.product_name && item.batchSize > 0);
+
+  if (!productionItems.length) {
+    return { generatedNow: false };
   }
+
+  const totalBatchSize = productionItems.reduce((total, item) => total + Number(item.batchSize || 0), 0);
+  const primaryItem = productionItems[0] || {};
+  const productSummary = productionItems
+    .map((item) => `${item.productionLabel || item.product_name} (${formatWholeQuantity(item.batchSize || item.quantity || 0)})`)
+    .join(" • ");
+  const productionPayload = {
+    order_number: generateProductionOrderNumber({ code: savedSale.sale_number || "VENDA" }),
+    product_id: primaryItem.product_id || primaryItem.linkedProduct?.id || null,
+    product_code: primaryItem.product_code || primaryItem.linkedProduct?.code || null,
+    product_name: productionItems.length === 1 ? primaryItem.productionLabel : `Lote ${savedSale.sale_number || "Venda"} - ${productionItems.length} itens`,
+    batch_size: totalBatchSize,
+    priority: payload.priority || "media",
+    status: "planned",
+    planned_start: payload.sale_date,
+    planned_end: payload.delivery_date,
+    lot_number: `LOTE-${savedSale.sale_number || String(savedSale.id || Date.now()).slice(0, 8)}`,
+    responsible_name: "PCP",
+    delivery_days: payload.delivery_days || null,
+    bom_structure_id: productionItems.length === 1 ? primaryItem.kit_structure_id || null : null,
+    production_items: productionItems,
+    operation_steps: buildDefaultProductionOperationSteps(),
+    timeline_entries: [
+      buildProductionTimelineEntry({
+        type: "created",
+        title: "OP gerada automaticamente",
+        description: `Venda ${savedSale.sale_number || savedSale.id} agrupada em lote único com ${productionItems.length} item(ns).`,
+        tone: "created",
+      }),
+    ],
+    attachments: buildProductionInitialAttachments(payload, savedSale),
+    material_plan: buildProductionMaterialPlan(productionItems),
+    quality_logs: [],
+    alerts: buildProductionInitialAlerts(productionItems),
+    current_step_index: 0,
+    produced_quantity: 0,
+    defective_quantity: 0,
+    rework_quantity: 0,
+    estimated_minutes: getProductionOperationStepTemplate().reduce((total, step) => total + Number(step.estimated_minutes || 0), 0),
+    active_operator: null,
+    notes: [
+      `Gerada pela Venda ${savedSale.sale_number || savedSale.id}`,
+      `Itens agrupados: ${productSummary}`,
+      payload.delivery_days ? `Entrega em ${payload.delivery_days} dia(s) - ${formatDate(payload.delivery_date)}` : "",
+      payload.contract_number ? `Contrato ${payload.contract_number}` : "",
+      stripMetadataLines(payload.contract_notes) || "",
+    ].filter(Boolean).join(" | "),
+    sale_id: savedSale.id,
+    sale_number: savedSale.sale_number || null,
+    customer_name: payload.customer_name,
+    origin: "sale_finalized",
+  };
+  const productionOrder = await persistProductionOrder(productionPayload, null, { regenerateOrderNumberOnDuplicate: true });
+  const orderIds = productionOrder?.id ? [productionOrder.id] : [];
 
   if (!orderIds.length) {
     return { generatedNow: false };
@@ -10887,6 +15018,8 @@ async function ensureProductionForSale(savedSale, payload) {
       contract_notes: payload.contract_notes,
       sale_date: payload.sale_date,
       delivery_date: payload.delivery_date,
+      delivery_days: payload.delivery_days,
+      priority: payload.priority || "media",
       payment_method: payload.payment_method,
       status: "finalized",
       sale_items: payload.sale_items,
@@ -10902,12 +15035,12 @@ async function ensureProductionForSale(savedSale, payload) {
   void queueSystemLog({
     moduleKey: "sales",
     action: "vinculo_producao",
-    level: "Atencao",
+    level: "Atenção",
     itemAffected: savedSale.sale_number || savedSale.id,
-    description: `Venda finalizada vinculada a ${orderIds.length} ordem(ns) de producao.`,
+    description: `Venda finalizada vinculada a ${orderIds.length} ordem(ns) de produção.`,
     entityType: "sale",
     entityId: savedSale.id,
-    payload: { order_ids: orderIds },
+    payload: { order_ids: orderIds, grouped_items: productionItems.length },
   });
 
   return { generatedNow: true, orderIds };
@@ -10920,6 +15053,7 @@ function hydrateCustomerDraft(customer) {
     name: customer.name || "",
     cnpj: metadata.cnpj || "",
     cpf: metadata.cpf || "",
+    state_registration: metadata.state_registration || "",
     email: metadata.email || "",
     phone: metadata.phone || "",
     contact: metadata.contact || "",
@@ -10943,6 +15077,7 @@ function syncCustomerDraftFromForm(form) {
     name: form.elements.namedItem("name")?.value || "",
     cnpj: form.elements.namedItem("cnpj")?.value || "",
     cpf: form.elements.namedItem("cpf")?.value || "",
+    state_registration: form.elements.namedItem("state_registration")?.value || "",
     email: form.elements.namedItem("email")?.value || "",
     phone: form.elements.namedItem("phone")?.value || "",
     contact: form.elements.namedItem("contact")?.value || "",
@@ -10965,6 +15100,7 @@ async function handleCustomerSubmit(event) {
     name: formData.get("name")?.toString().trim(),
     cnpj: submittedCnpj || submittedCpf,
     cpf: submittedCpf,
+    state_registration: formData.get("state_registration")?.toString().trim(),
     email: formData.get("email")?.toString().trim(),
     phone: formatPhoneBr(formData.get("phone")?.toString() || ""),
     contact: formData.get("contact")?.toString().trim(),
@@ -10975,7 +15111,7 @@ async function handleCustomerSubmit(event) {
   };
 
   if (!payload.name) {
-    showToast("O nome do cliente e obrigatorio.", "warning");
+    showToast("O nome do cliente e obrigatório.", "warning");
     return;
   }
 
@@ -10990,8 +15126,8 @@ async function handleCustomerSubmit(event) {
   }
 
   try {
-    await persistCustomer(payload, editId);
-    await loadTable("customers", "customers");
+    const savedCustomer = await persistCustomer(payload, editId);
+    upsertModuleRecord("customers", savedCustomer || { ...payload, id: editId || payload.cnpj || payload.cpf || payload.name });
     resetCustomerFormState();
     renderActiveModule();
     void queueSystemLog({
@@ -11012,11 +15148,11 @@ async function handleCustomerSubmit(event) {
 
 async function persistCustomer(payload, editId) {
   const query = editId
-    ? state.supabase.from("customers").update(payload).eq("id", editId)
-    : state.supabase.from("customers").insert(payload);
-  const { error } = await query;
+    ? state.supabase.from("customers").update(payload).eq("id", editId).select().single()
+    : state.supabase.from("customers").insert(payload).select().single();
+  const { data, error } = await query;
 
-  if (!error) return;
+  if (!error) return data;
   if (!isCustomerSchemaCompatibilityError(error)) {
     throw error;
   }
@@ -11027,16 +15163,18 @@ async function persistCustomer(payload, editId) {
     address: buildLegacyCustomerAddress(payload),
   };
   const legacyQuery = editId
-    ? state.supabase.from("customers").update(legacyPayload).eq("id", editId)
-    : state.supabase.from("customers").insert(legacyPayload);
-  const { error: legacyError } = await legacyQuery;
+    ? state.supabase.from("customers").update(legacyPayload).eq("id", editId).select().single()
+    : state.supabase.from("customers").insert(legacyPayload).select().single();
+  const { data: legacyData, error: legacyError } = await legacyQuery;
   if (legacyError) throw legacyError;
+  return legacyData;
 }
 
 function buildLegacyCustomerAddress(payload) {
   const metadataLines = [
     payload.cnpj ? `[meta:cnpj]${payload.cnpj}` : "",
     payload.cpf ? `[meta:cpf]${payload.cpf}` : "",
+    payload.state_registration ? `[meta:state_registration]${payload.state_registration}` : "",
     payload.email ? `[meta:email]${payload.email}` : "",
     payload.phone ? `[meta:phone]${payload.phone}` : "",
     payload.contact ? `[meta:contact]${payload.contact}` : "",
@@ -11054,6 +15192,7 @@ function getCustomerMetadata(customer) {
   const metadata = {
     cnpj: customer.cnpj || "",
     cpf: customer.cpf || "",
+    state_registration: customer.state_registration || "",
     email: customer.email || "",
     phone: customer.phone || "",
     contact: customer.contact || "",
@@ -11075,6 +15214,7 @@ function getCustomerMetadata(customer) {
   rawAddress.split("\n").forEach((line) => {
     if (line.startsWith("[meta:cnpj]") && !customer.cnpj) metadata.cnpj = line.replace("[meta:cnpj]", "").trim();
     else if (line.startsWith("[meta:cpf]") && !customer.cpf) metadata.cpf = line.replace("[meta:cpf]", "").trim();
+    else if (line.startsWith("[meta:state_registration]") && !customer.state_registration) metadata.state_registration = line.replace("[meta:state_registration]", "").trim();
     else if (line.startsWith("[meta:email]") && !customer.email) metadata.email = line.replace("[meta:email]", "").trim();
     else if (line.startsWith("[meta:phone]") && !customer.phone) metadata.phone = line.replace("[meta:phone]", "").trim();
     else if (line.startsWith("[meta:contact]") && !customer.contact) metadata.contact = line.replace("[meta:contact]", "").trim();
@@ -11222,7 +15362,7 @@ async function handleProductionSubmit(event) {
   }
 
   if (new Date(`${plannedEnd}T00:00:00`) < new Date(`${plannedStart}T00:00:00`)) {
-    showToast("O fim previsto nao pode ser anterior ao inicio.", "warning");
+    showToast("O fim previsto não pode ser anterior ao inicio.", "warning");
     return;
   }
 
@@ -11242,8 +15382,8 @@ async function handleProductionSubmit(event) {
   };
 
   try {
-    const savedOrder = await persistProductionOrder(payload, editId);
-    await loadTable("production_orders", "production");
+    const savedOrder = await persistProductionOrder(payload, editId, { regenerateOrderNumberOnDuplicate: !editId });
+    upsertModuleRecord("production", savedOrder);
     if (typeof maybeGenerateServiceOrderFromCompletedProduction === "function") {
       await maybeGenerateServiceOrderFromCompletedProduction(savedOrder, product, previousOrder);
     }
@@ -11253,11 +15393,11 @@ async function handleProductionSubmit(event) {
       moduleKey: "production",
       action: editId ? "edicao" : "criacao",
       level: "Informativo",
-      itemAffected: payload.order_number,
-      description: `Ordem de producao ${editId ? "atualizada" : "criada"} para ${payload.product_name}.`,
+      itemAffected: savedOrder?.order_number || payload.order_number,
+      description: `Ordem de produção ${editId ? "atualizada" : "criada"} para ${payload.product_name}.`,
       entityType: "production_order",
-      entityId: savedOrder?.id || editId || payload.order_number,
-      payload,
+      entityId: savedOrder?.id || editId || savedOrder?.order_number || payload.order_number,
+      payload: { ...payload, order_number: savedOrder?.order_number || payload.order_number },
     });
     showToast(editId ? "Ordem atualizada com sucesso." : "Ordem salva com sucesso.", "success");
   } catch (error) {
@@ -11265,7 +15405,30 @@ async function handleProductionSubmit(event) {
   }
 }
 
-async function persistProductionOrder(payload, editId) {
+async function persistProductionOrder(payload, editId, options = {}) {
+  let nextPayload = { ...payload };
+  const shouldRegenerateOrderNumber = !editId && options.regenerateOrderNumberOnDuplicate;
+
+  for (let attempt = 0; attempt < PRODUCTION_ORDER_NUMBER_RETRY_LIMIT; attempt += 1) {
+    try {
+      return await persistProductionOrderAttempt(nextPayload, editId);
+    } catch (error) {
+      if (!shouldRegenerateOrderNumber || !isProductionOrderNumberDuplicateError(error) || attempt === PRODUCTION_ORDER_NUMBER_RETRY_LIMIT - 1) {
+        throw error;
+      }
+      nextPayload = {
+        ...nextPayload,
+        order_number: generateProductionOrderNumber({
+          code: nextPayload.product_code || nextPayload.product_name || "ERP",
+        }),
+      };
+    }
+  }
+
+  return persistProductionOrderAttempt(nextPayload, editId);
+}
+
+async function persistProductionOrderAttempt(payload, editId) {
   const query = editId
     ? state.supabase.from("production_orders").update(payload).eq("id", editId).select().single()
     : state.supabase.from("production_orders").insert(payload).select().single();
@@ -11274,6 +15437,33 @@ async function persistProductionOrder(payload, editId) {
   if (!error) return data;
   if (!isProductionSchemaCompatibilityError(error)) {
     throw error;
+  }
+
+  const compatiblePayload = { ...payload };
+  delete compatiblePayload.delivery_days;
+  delete compatiblePayload.production_items;
+  delete compatiblePayload.operation_steps;
+  delete compatiblePayload.timeline_entries;
+  delete compatiblePayload.attachments;
+  delete compatiblePayload.material_plan;
+  delete compatiblePayload.quality_logs;
+  delete compatiblePayload.alerts;
+  delete compatiblePayload.current_step_index;
+  delete compatiblePayload.produced_quantity;
+  delete compatiblePayload.defective_quantity;
+  delete compatiblePayload.rework_quantity;
+  delete compatiblePayload.estimated_minutes;
+  delete compatiblePayload.active_operator;
+  delete compatiblePayload.started_at;
+  delete compatiblePayload.paused_at;
+  delete compatiblePayload.completed_at;
+  const compatibleQuery = editId
+    ? state.supabase.from("production_orders").update(compatiblePayload).eq("id", editId).select().single()
+    : state.supabase.from("production_orders").insert(compatiblePayload).select().single();
+  const { data: compatibleData, error: compatibleError } = await compatibleQuery;
+  if (!compatibleError) return compatibleData;
+  if (!isProductionSchemaCompatibilityError(compatibleError)) {
+    throw compatibleError;
   }
 
   const legacyPayload = {
@@ -11302,15 +15492,49 @@ function buildLegacyProductionNotes(payload) {
     payload.sale_id ? `[meta:sale_id]${payload.sale_id}` : "",
     payload.sale_number ? `[meta:sale_number]${payload.sale_number}` : "",
     payload.customer_name ? `[meta:customer_name]${payload.customer_name}` : "",
+    payload.product_id ? `[meta:product_id]${payload.product_id}` : "",
+    payload.product_code ? `[meta:product_code]${payload.product_code}` : "",
+    payload.delivery_days ? `[meta:delivery_days]${payload.delivery_days}` : "",
+    payload.bom_structure_id ? `[meta:bom_structure_id]${payload.bom_structure_id}` : "",
+    payload.production_items?.length ? `[meta:production_items]${JSON.stringify(payload.production_items)}` : "",
+    payload.operation_steps?.length ? `[meta:operation_steps]${JSON.stringify(payload.operation_steps)}` : "",
+    payload.timeline_entries?.length ? `[meta:timeline_entries]${JSON.stringify(payload.timeline_entries)}` : "",
+    payload.attachments?.length ? `[meta:attachments]${JSON.stringify(payload.attachments)}` : "",
+    payload.material_plan?.length ? `[meta:material_plan]${JSON.stringify(payload.material_plan)}` : "",
+    payload.quality_logs?.length ? `[meta:quality_logs]${JSON.stringify(payload.quality_logs)}` : "",
+    payload.alerts?.length ? `[meta:alerts]${JSON.stringify(payload.alerts)}` : "",
+    payload.current_step_index ? `[meta:current_step_index]${payload.current_step_index}` : "",
+    payload.produced_quantity ? `[meta:produced_quantity]${payload.produced_quantity}` : "",
+    payload.defective_quantity ? `[meta:defective_quantity]${payload.defective_quantity}` : "",
+    payload.rework_quantity ? `[meta:rework_quantity]${payload.rework_quantity}` : "",
+    payload.estimated_minutes ? `[meta:estimated_minutes]${payload.estimated_minutes}` : "",
+    payload.active_operator ? `[meta:active_operator]${payload.active_operator}` : "",
+    payload.started_at ? `[meta:started_at]${payload.started_at}` : "",
+    payload.paused_at ? `[meta:paused_at]${payload.paused_at}` : "",
+    payload.completed_at ? `[meta:completed_at]${payload.completed_at}` : "",
   ].filter(Boolean);
 
   return [...metaLines, payload.notes || ""].filter(Boolean).join("\n");
 }
 
-function findActiveBomStructureForProduct(product) {
+function findActiveBomStructureForProduct(product, preferredStructureId = "") {
   if (!product) return null;
 
-  return (state.moduleData.bomStructures || []).find((structure) =>
+  const activeStructures = state.moduleData.bomStructures || [];
+  const preferredStructure = preferredStructureId
+    ? activeStructures.find((structure) =>
+      structure.id === preferredStructureId
+      && structure.status === "active"
+      && (
+        structure.product_id === product.id
+        || (structure.product_code && structure.product_code === product.code)
+        || (structure.product_name && structure.product_name === product.name)
+      )
+    )
+    : null;
+  if (preferredStructure) return preferredStructure;
+
+  return activeStructures.find((structure) =>
     structure.status === "active"
     && (
       structure.product_id === product.id
@@ -11338,7 +15562,10 @@ function findProductForBomStructureItem(item) {
 
 function findMachiningPieceForRequirement(requirement) {
   return (state.moduleData.machiningPieces || []).find((piece) =>
-    (requirement.code && piece.code === requirement.code)
+    (requirement.product?.id && piece.finished_product_id === requirement.product.id)
+    || (requirement.product_id && piece.finished_product_id === requirement.product_id)
+    || (requirement.id && piece.finished_product_id === requirement.id)
+    || (requirement.code && piece.code === requirement.code)
     || (requirement.name && piece.name === requirement.name)
     || (requirement.name && piece.finished_name === requirement.name)
   ) || null;
@@ -11346,6 +15573,10 @@ function findMachiningPieceForRequirement(requirement) {
 
 function createAutomatedMachiningOrder(piece, requirement, sourceOrder) {
   if (!piece || !requirement || Number(requirement.missingQuantity || 0) <= 0) {
+    return false;
+  }
+
+  if ((piece.productions || []).some((order) => order.status !== "Concluída")) {
     return false;
   }
 
@@ -11365,14 +15596,15 @@ function createAutomatedMachiningOrder(piece, requirement, sourceOrder) {
 
   const operator = getLoggedUserName(sourceOrder?.responsible_name || "");
   const lotBase = sourceOrder?.lot_number || sourceOrder?.order_number || `LOT-${String(Date.now()).slice(-6)}`;
+  const finishedProduct = (state.moduleData.products || []).find((product) => product.id === piece.finished_product_id);
   const nextOrder = normalizeMachiningOrderRecord({
     id: `mach-order-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
     order_number: `OP-USI-${String(Date.now()).slice(-8)}`,
     quantity_planned: requirement.missingQuantity,
     lot: `${lotBase}-${String(requirement.code || piece.code || "PEC").replace(/[^A-Za-z0-9]/g, "").slice(0, 10)}`,
     operator,
-    finished_name: piece.finished_name || piece.name,
-    status: "Em Producao",
+    finished_name: finishedProduct?.name || piece.finished_name || piece.name,
+    status: "Em Produção",
     current_step_index: 0,
     steps,
     created_at: new Date().toISOString(),
@@ -11392,7 +15624,8 @@ function createAutomatedMachiningOrder(piece, requirement, sourceOrder) {
 }
 
 async function applyBomConsumptionOnProductionStart(order, product) {
-  const structure = findActiveBomStructureForProduct(product);
+  const metadata = getProductionOrderMetadata(order);
+  const structure = findActiveBomStructureForProduct(product, metadata.bomStructureId);
   if (!structure) {
     return {
       structure: null,
@@ -11425,11 +15658,40 @@ async function applyBomConsumptionOnProductionStart(order, product) {
       return;
     }
 
+    if (item.source_type === "product" || item.source_type === "product_option") {
+      const productId = item.source_type === "product_option" ? item.source_key?.split(":")?.[1] : item.component_id;
+      const linkedProduct = (state.moduleData.products || []).find((entry) => entry.id === productId);
+      if (!linkedProduct) return;
+      let legacySaleOptionId = "";
+      if (item.source_type === "product_option") {
+        const detail = String(item.source_key || "").split(":").slice(2).join(":");
+        try {
+          legacySaleOptionId = decodeURIComponent(detail);
+        } catch {
+          legacySaleOptionId = detail;
+        }
+      }
+      const saleOptionKey = item.sale_option_id || legacySaleOptionId;
+      const saleOption = saleOptionKey ? findProductSaleOption(linkedProduct, saleOptionKey) : null;
+      const requirementKey = `${linkedProduct.id}:${saleOption?.id || ""}`;
+      const existing = productRequirements.get(requirementKey) || {
+        product: linkedProduct,
+        saleOption,
+        requiredQuantity: 0,
+        code: saleOption?.code || linkedProduct.code,
+        name: saleOption ? `${linkedProduct.name} - ${saleOption.label}` : linkedProduct.name,
+      };
+      existing.requiredQuantity += requiredQuantity;
+      productRequirements.set(requirementKey, existing);
+      return;
+    }
+
     if (item.source_type === "structure") {
       const linkedProduct = findProductForBomStructureItem(item);
       if (!linkedProduct) return;
       const existing = productRequirements.get(linkedProduct.id) || {
         product: linkedProduct,
+        saleOption: null,
         requiredQuantity: 0,
         code: linkedProduct.code,
         name: linkedProduct.name,
@@ -11477,7 +15739,9 @@ async function applyBomConsumptionOnProductionStart(order, product) {
   }
 
   for (const requirement of productRequirements.values()) {
-    const availableQuantity = Number(requirement.product.current_stock || 0);
+    const availableQuantity = requirement.saleOption
+      ? Number(requirement.saleOption.current_stock || 0)
+      : Number(requirement.product.current_stock || 0);
     const consumedQuantity = Math.min(availableQuantity, requirement.requiredQuantity);
     const missingQuantity = Math.max(requirement.requiredQuantity - consumedQuantity, 0);
 
@@ -11488,11 +15752,14 @@ async function applyBomConsumptionOnProductionStart(order, product) {
           product_id: requirement.product.id,
           product_name: requirement.product.name,
           product_code: requirement.product.code,
+          sale_option_id: requirement.saleOption?.id || null,
+          sale_option_code: requirement.saleOption?.code || null,
+          sale_option_label: requirement.saleOption?.label || null,
           movement_type: "exit",
           quantity: consumedQuantity,
           batch: order.lot_number || requirement.product.batch || null,
           machine_serial: requirement.product.machine_serial || null,
-          notes: `Baixa automatica pela producao ${order.order_number}`,
+          notes: `Baixa automática pela produção ${order.order_number}`,
           moved_by_user_id: state.currentUser?.user_id || null,
           moved_by_name: getLoggedUserName(null),
         },
@@ -11528,7 +15795,7 @@ async function applyBomConsumptionOnProductionStart(order, product) {
 
 function buildProductionStartSummary(result) {
   if (!result?.structure) {
-    return "Producao iniciada sem BOM ativa vinculada.";
+    return "Produção iniciada sem BOM ativa vinculada.";
   }
 
   const parts = [];
@@ -11542,29 +15809,95 @@ function buildProductionStartSummary(result) {
   if (result.missingRequirements.length > result.machiningRequests.length) {
     parts.push(`${result.missingRequirements.length - result.machiningRequests.length} item(ns) sem cadastro na usinagem`);
   }
-  return parts.length ? `${parts.join(" • ")}.` : "Producao iniciada. Nenhum consumo foi necessario.";
+  return parts.length ? `${parts.join(" • ")}.` : "Produção iniciada. Nenhum consumo foi necessario.";
+}
+
+async function applyGroupedBomConsumptionOnProductionStart(order) {
+  const metadata = getProductionOrderMetadata(order);
+  const items = metadata.productionItems?.length ? metadata.productionItems : [];
+  if (!items.length) {
+    const product = await findProductionOrderProduct(order);
+    return product
+      ? applyBomConsumptionOnProductionStart(order, product)
+      : {
+        structure: null,
+        consumedMaterials: [],
+        consumedProducts: [],
+        machiningRequests: [],
+        missingRequirements: [],
+        productMissing: true,
+      };
+  }
+
+  const aggregate = {
+    structure: null,
+    consumedMaterials: [],
+    consumedProducts: [],
+    machiningRequests: [],
+    missingRequirements: [],
+    productMissing: false,
+  };
+
+  for (const item of items) {
+    const product = (state.moduleData.products || []).find((entry) =>
+      entry.id === item.product_id
+      || (item.product_code && entry.code === item.product_code)
+      || entry.name === item.product_name
+    );
+    if (!product) {
+      aggregate.productMissing = true;
+      continue;
+    }
+    const result = await applyBomConsumptionOnProductionStart({
+      ...order,
+      product_id: product.id,
+      product_code: product.code,
+      product_name: product.name,
+      batch_size: Number(item.batchSize || item.batch_size || item.quantity || 0),
+      bom_structure_id: item.kit_structure_id || metadata.bomStructureId || null,
+    }, product);
+    aggregate.structure = aggregate.structure || result.structure;
+    aggregate.consumedMaterials.push(...result.consumedMaterials);
+    aggregate.consumedProducts.push(...result.consumedProducts);
+    aggregate.machiningRequests.push(...result.machiningRequests);
+    aggregate.missingRequirements.push(...result.missingRequirements);
+  }
+
+  return aggregate;
 }
 
 async function handleProductionStart(orderId) {
   const order = (state.moduleData.production || []).find((item) => item.id === orderId);
   if (!order || order.status !== "planned") return;
 
-  const product = (state.moduleData.products || []).find((item) =>
-    item.id === order.product_id
-      || (order.product_code && item.code === order.product_code)
-      || item.name === order.product_name
-  );
-
-  if (!product) {
-    showToast("Produto da ordem nao encontrado.", "danger");
-    return;
-  }
-
   try {
-    const result = await applyBomConsumptionOnProductionStart(order, product);
+    const metadata = getProductionOrderMetadata(order);
+    const operationSteps = metadata.operationSteps.map((step, index) => ({
+      ...step,
+      status: index === 0 ? "in_progress" : step.status === "locked" ? "locked" : step.status,
+      started_at: index === 0 ? step.started_at || new Date().toISOString() : step.started_at || "",
+      operator: index === 0 ? step.operator || getLoggedUserName(order.responsible_name || "") : step.operator || "",
+    }));
+    const result = await applyGroupedBomConsumptionOnProductionStart(order);
+    const timelineEntries = [
+      buildProductionTimelineEntry({
+        type: "started",
+        title: "OP iniciada",
+        description: buildProductionStartSummary(result),
+        tone: result.missingRequirements.length || result.productMissing ? "warning" : "approved",
+      }),
+      ...metadata.timelineEntries,
+    ];
     const { error } = await state.supabase
       .from("production_orders")
-      .update({ status: "in_progress" })
+      .update({
+        status: "in_progress",
+        operation_steps: operationSteps,
+        timeline_entries: timelineEntries,
+        started_at: order.started_at || new Date().toISOString(),
+        active_operator: operationSteps[0]?.operator || getLoggedUserName(order.responsible_name || ""),
+        current_step_index: 0,
+      })
       .eq("id", order.id);
     if (error) throw error;
 
@@ -11578,7 +15911,7 @@ async function handleProductionStart(orderId) {
     void queueSystemLog({
       moduleKey: "production",
       action: "mudanca_status",
-      level: result.missingRequirements.length ? "Atencao" : "Informativo",
+      level: result.missingRequirements.length ? "Atenção" : "Informativo",
       itemAffected: order.order_number,
       description: `Ordem iniciada e alterada para em andamento.`,
       entityType: "production_order",
@@ -11592,10 +15925,340 @@ async function handleProductionStart(orderId) {
         missing_requirements: result.missingRequirements.length,
       },
     });
-    showToast(buildProductionStartSummary(result), result.missingRequirements.length ? "warning" : "success");
+    showToast(
+      result.productMissing ? "Produção iniciada sem produto vinculado para baixa de BOM." : buildProductionStartSummary(result),
+      result.missingRequirements.length || result.productMissing ? "warning" : "success"
+    );
+    showProductionNotification("Nova OP iniciada no painel de produção.", result.missingRequirements.length ? "warning" : "created");
   } catch (error) {
     showToast(formatError(error), "danger");
   }
+}
+
+function enterProductionFocusMode(orderId) {
+  if (!orderId) return;
+
+  state.activeModule = "production";
+  state.productionSelectedOrderId = orderId;
+  state.productionDashboardTab = "operations";
+  state.productionFocusOrderId = orderId;
+  document.body.classList.add("production-focus-active");
+
+  const fullscreenTarget = elements.moduleContainer || elements.appScreen || document.documentElement;
+  if (!document.fullscreenElement && fullscreenTarget?.requestFullscreen) {
+    fullscreenTarget.requestFullscreen().catch(() => {});
+  }
+}
+
+function exitProductionFocusMode() {
+  state.productionFocusOrderId = "";
+  document.body.classList.remove("production-focus-active");
+  if (document.fullscreenElement && document.exitFullscreen) {
+    document.exitFullscreen().catch(() => {});
+  }
+  renderActiveModule();
+}
+
+document.addEventListener("fullscreenchange", () => {
+  if (!document.fullscreenElement && state.productionFocusOrderId) {
+    state.productionFocusOrderId = "";
+    document.body.classList.remove("production-focus-active");
+    renderActiveModule();
+  }
+});
+
+function buildProductionOrderPrintHtml(order) {
+  const metadata = getProductionOrderMetadata(order);
+  const items = metadata.productionItems?.length
+    ? metadata.productionItems
+    : [{
+      product_name: order.product_name,
+      product_code: order.product_code || metadata.productCode,
+      quantity: order.batch_size,
+      batchSize: order.batch_size,
+      sale_option_label: "",
+    }];
+  const itemRows = items.map((item) => `
+    <tr>
+      <td>
+        <strong>${escapeHtml(item.productionLabel || item.product_name || order.product_name || "-")}</strong>
+        ${item.sale_option_label ? `<div class="table-inline-copy">${escapeHtml(item.sale_option_label)}</div>` : ""}
+      </td>
+      <td>${escapeHtml(item.product_code || order.product_code || metadata.productCode || "-")}</td>
+      <td class="is-centered">${formatWholeQuantity(item.quantity || order.batch_size || 0)}</td>
+      <td class="is-centered">${formatWholeQuantity(item.batchSize || item.batch_size || order.batch_size || 0)}</td>
+    </tr>
+  `).join("");
+
+  return `
+    <article class="sales-document-sheet">
+      <div class="sales-print-shell">
+        <header class="sales-print-header">
+          <div class="sales-print-company">
+            <span class="sales-print-company-name">Ordem de Produção</span>
+            <span>${escapeHtml(order.order_number || "-")}</span>
+            <span>${escapeHtml(metadata.customerName || order.customer_name || "")}</span>
+          </div>
+        </header>
+        <section class="sales-print-meta">
+          <div class="sales-print-meta-item"><span class="sales-print-meta-label">Produto</span><strong>${escapeHtml(order.product_name || "-")}</strong></div>
+          <div class="sales-print-meta-item"><span class="sales-print-meta-label">Status</span><strong>${escapeHtml(getProductionStatusLabel(order.status || "planned"))}</strong></div>
+          <div class="sales-print-meta-item"><span class="sales-print-meta-label">Prioridade</span><strong>${escapeHtml(getProductionPriorityLabel(metadata.priority))}</strong></div>
+          <div class="sales-print-meta-item"><span class="sales-print-meta-label">Entrega</span><strong>${escapeHtml(formatDate(order.planned_end))}</strong></div>
+          <div class="sales-print-meta-item"><span class="sales-print-meta-label">Lote</span><strong>${escapeHtml(metadata.lotNumber || "-")}</strong></div>
+          <div class="sales-print-meta-item"><span class="sales-print-meta-label">Responsável</span><strong>${escapeHtml(metadata.responsibleName || "-")}</strong></div>
+        </section>
+        <section class="sales-print-table-wrap">
+          <table class="sales-document-items-table">
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Código</th>
+                <th>Qtd venda</th>
+                <th>Qtd produção</th>
+              </tr>
+            </thead>
+            <tbody>${itemRows}</tbody>
+          </table>
+        </section>
+        ${metadata.notes ? `<section class="sales-print-block"><p><strong>Observações:</strong><br>${escapeHtmlWithLineBreaks(metadata.notes)}</p></section>` : ""}
+        ${metadata.saleNumber ? `<section class="sales-print-block"><p><strong>Venda vinculada:</strong> ${escapeHtml(metadata.saleNumber)}</p></section>` : ""}
+      </div>
+    </article>
+  `;
+}
+
+function getProductionPriorityLabel(priority) {
+  return {
+    baixa: "Baixa",
+    media: "Média",
+    alta: "Alta",
+    urgente: "Urgente",
+  }[String(priority || "media").toLowerCase()] || "Média";
+}
+
+function getProductionStatusLabel(status) {
+  return {
+    planned: "Planejada",
+    in_progress: "Em andamento",
+    paused: "Pausada",
+    completed: "Concluída",
+    cancelled: "Cancelada",
+  }[String(status || "planned").toLowerCase()] || String(status || "-");
+}
+
+function getProductionOperationStepLabel(status) {
+  return {
+    locked: "Aguardando",
+    pending: "Liberada",
+    in_progress: "Em andamento",
+    quality: "Qualidade",
+    completed: "Concluída",
+  }[String(status || "locked")] || "Aguardando";
+}
+
+function getProductionOperationActionLabel(status) {
+  if (status === "pending") return "Iniciar";
+  if (status === "in_progress") return "Enviar p/ qualidade";
+  if (status === "quality") return "Concluir etapa";
+  if (status === "completed") return "Concluída";
+  return "Bloqueada";
+}
+
+async function handleProductionOperationAdvance(rawValue) {
+  const [orderId, stepIndexValue] = String(rawValue || "").split("|");
+  const stepIndex = Number(stepIndexValue);
+  const order = (state.moduleData.production || []).find((item) => item.id === orderId);
+  if (!order) return;
+
+  const metadata = getProductionOrderMetadata(order);
+  const steps = metadata.operationSteps.map((step) => ({ ...step }));
+  const step = steps[stepIndex];
+  const activeIndex = Math.max(0, steps.findIndex((entry) => ["pending", "in_progress", "quality"].includes(entry.status)));
+  if (!step || stepIndex !== activeIndex || ["locked", "completed"].includes(step.status)) {
+    showToast("Finalize a etapa atual antes de liberar a próxima.", "warning");
+    return;
+  }
+
+  const operator = step.operator || getLoggedUserName(metadata.activeOperator || metadata.responsibleName || "");
+  let notificationType = "notified";
+  let timelineTitle = "";
+  let timelineDescription = "";
+
+  if (step.status === "pending") {
+    step.status = "in_progress";
+    step.started_at = step.started_at || new Date().toISOString();
+    step.operator = operator;
+    timelineTitle = "Etapa iniciada";
+    timelineDescription = `${step.name} em execução por ${operator || "operador não informado"}.`;
+    notificationType = "approved";
+  } else if (step.status === "in_progress") {
+    step.status = "quality";
+    step.operator = operator;
+    timelineTitle = "Etapa enviada para qualidade";
+    timelineDescription = `${step.name} aguardando inspeção/validação.`;
+    notificationType = "warning";
+  } else if (step.status === "quality") {
+    step.status = "completed";
+    step.completed_at = new Date().toISOString();
+    step.operator = operator;
+    step.elapsed_minutes = calculateElapsedMinutes(step.started_at, step.completed_at);
+    const nextStep = steps[stepIndex + 1];
+    if (nextStep) {
+      nextStep.status = "pending";
+    }
+    timelineTitle = "Etapa concluída";
+    timelineDescription = nextStep ? `${step.name} concluída. Próxima etapa liberada: ${nextStep.name}.` : `${step.name} concluída. OP finalizada.`;
+    notificationType = nextStep ? "completed" : "purchase_completed";
+  }
+
+  const completedSteps = steps.filter((entry) => entry.status === "completed").length;
+  const isCompleted = completedSteps === steps.length;
+  const nextActiveIndex = Math.max(0, steps.findIndex((entry) => ["pending", "in_progress", "quality"].includes(entry.status)));
+  const productionItems = metadata.productionItems?.length ? metadata.productionItems : [];
+  const producedQuantity = isCompleted
+    ? Number(order.batch_size || 0)
+    : Math.round((Number(order.batch_size || 0) * completedSteps) / Math.max(steps.length, 1));
+  const timelineEntries = [
+    buildProductionTimelineEntry({
+      type: "operation",
+      title: timelineTitle,
+      description: timelineDescription,
+      tone: notificationType,
+      operator,
+    }),
+    ...metadata.timelineEntries,
+  ].slice(0, 80);
+
+  try {
+    const updatePayload = {
+      operation_steps: steps,
+      timeline_entries: timelineEntries,
+      current_step_index: isCompleted ? steps.length - 1 : nextActiveIndex,
+      active_operator: isCompleted ? "" : (steps[nextActiveIndex]?.operator || operator || ""),
+      produced_quantity: producedQuantity,
+      status: isCompleted ? "completed" : "in_progress",
+      completed_at: isCompleted ? new Date().toISOString() : metadata.completedAt || null,
+      quality_logs: [
+        ...metadata.qualityLogs,
+        step.status === "completed" ? {
+          id: `ql-${Date.now()}`,
+          step: step.name,
+          operator,
+          defects: Number(step.defects || 0),
+          rework: Number(step.rework || 0),
+          created_at: new Date().toISOString(),
+        } : null,
+      ].filter(Boolean),
+      production_items: productionItems,
+    };
+    const { error } = await state.supabase.from("production_orders").update(updatePayload).eq("id", order.id);
+    if (error) throw error;
+    upsertModuleRecord("production", {
+      ...order,
+      ...updatePayload,
+    });
+    renderActiveModule();
+    void queueSystemLog({
+      moduleKey: "production",
+      action: "mudanca_etapa",
+      level: isCompleted ? "Informativo" : "Atenção",
+      itemAffected: order.order_number,
+      description: timelineDescription,
+      entityType: "production_order",
+      entityId: order.id,
+      payload: { step: step.name, status: step.status },
+    });
+    showProductionNotification(isCompleted ? "OP finalizada com sucesso." : timelineDescription, notificationType);
+  } catch (error) {
+    showToast(formatError(error), "danger");
+  }
+}
+
+function calculateElapsedMinutes(startedAt, completedAt) {
+  const started = startedAt ? new Date(startedAt) : null;
+  const completed = completedAt ? new Date(completedAt) : new Date();
+  if (!started || Number.isNaN(started.getTime()) || Number.isNaN(completed.getTime())) return 0;
+  return Math.max(0, Math.round((completed - started) / 60000));
+}
+
+function handleProductionPrint(orderId) {
+  const order = (state.moduleData.production || []).find((item) => item.id === orderId);
+  if (!order) {
+    showToast("Ordem de produção não encontrada.", "warning");
+    return;
+  }
+  openPrintWindowForHtml(buildProductionOrderPrintHtml(order), `Ordem de Produção ${order.order_number || ""}`.trim());
+}
+
+function findProductionOrderProductInState(order) {
+  const metadata = getProductionOrderMetadata(order);
+  const productionItem = metadata.productionItems?.[0] || null;
+  return (state.moduleData.products || []).find((item) =>
+    item.id === (order.product_id || metadata.productId || productionItem?.product_id)
+      || ((order.product_code || metadata.productCode || productionItem?.product_code) && item.code === (order.product_code || metadata.productCode || productionItem?.product_code))
+      || item.name === order.product_name
+      || (productionItem?.product_name && item.name === productionItem.product_name)
+  ) || null;
+}
+
+async function findProductionOrderProduct(order) {
+  const metadata = getProductionOrderMetadata(order);
+  const productionItem = metadata.productionItems?.[0] || null;
+  const localProduct = findProductionOrderProductInState(order);
+  if (localProduct || !state.supabase) return localProduct;
+
+  await loadProductsTable();
+  const reloadedProduct = findProductionOrderProductInState(order);
+  if (reloadedProduct) return reloadedProduct;
+
+  let query = state.supabase.from("products").select("*").limit(1);
+  const productId = order.product_id || metadata.productId || productionItem?.product_id || "";
+  const productCode = order.product_code || metadata.productCode || productionItem?.product_code || "";
+  if (productId) {
+    query = query.eq("id", productId);
+  } else if (productCode) {
+    query = query.eq("code", productCode);
+  } else if (order.product_name) {
+    query = query.eq("name", order.product_name);
+  } else {
+    return findProductionOrderProductFromSale(metadata);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+  const fetchedProduct = data?.[0] || null;
+  if (fetchedProduct) {
+    state.moduleData.products = [fetchedProduct, ...(state.moduleData.products || []).filter((item) => item.id !== fetchedProduct.id)];
+  }
+  return fetchedProduct || findProductionOrderProductFromSale(metadata);
+}
+
+async function findProductionOrderProductFromSale(metadata) {
+  const saleId = metadata.saleId || "";
+  if (!saleId || !state.supabase) return null;
+
+  let sale = (state.moduleData.sales || []).find((item) => item.id === saleId) || null;
+  if (!sale) {
+    const { data, error } = await state.supabase
+      .from("sales")
+      .select("id,sale_items")
+      .eq("id", saleId)
+      .limit(1);
+    if (error) throw error;
+    sale = data?.[0] || null;
+  }
+  const saleMetadata = sale ? getSaleMetadata(sale) : null;
+  const saleItem = saleMetadata?.items?.find((item) =>
+    item.product_id || item.product_code || item.product_name
+  );
+  if (!saleItem) return null;
+
+  return (state.moduleData.products || []).find((product) =>
+    product.id === saleItem.product_id
+      || (saleItem.product_code && product.code === saleItem.product_code)
+      || product.name === saleItem.product_name
+  ) || null;
 }
 
 function getProductionOrderMetadata(order) {
@@ -11604,6 +16267,29 @@ function getProductionOrderMetadata(order) {
     priority: order.priority || "media",
     lotNumber: order.lot_number || "",
     responsibleName: order.responsible_name || "",
+    deliveryDays: order.delivery_days || "",
+    bomStructureId: order.bom_structure_id || "",
+    productId: order.product_id || "",
+    productCode: order.product_code || "",
+    saleId: order.sale_id || "",
+    saleNumber: order.sale_number || "",
+    customerName: order.customer_name || "",
+    productionItems: Array.isArray(order.production_items) ? order.production_items : [],
+    operationSteps: Array.isArray(order.operation_steps) ? order.operation_steps : [],
+    timelineEntries: Array.isArray(order.timeline_entries) ? order.timeline_entries : [],
+    attachments: Array.isArray(order.attachments) ? order.attachments : [],
+    materialPlan: Array.isArray(order.material_plan) ? order.material_plan : [],
+    qualityLogs: Array.isArray(order.quality_logs) ? order.quality_logs : [],
+    alerts: Array.isArray(order.alerts) ? order.alerts : [],
+    currentStepIndex: Number(order.current_step_index || 0),
+    producedQuantity: Number(order.produced_quantity || 0),
+    defectiveQuantity: Number(order.defective_quantity || 0),
+    reworkQuantity: Number(order.rework_quantity || 0),
+    estimatedMinutes: Number(order.estimated_minutes || 0),
+    activeOperator: order.active_operator || "",
+    startedAt: order.started_at || "",
+    pausedAt: order.paused_at || "",
+    completedAt: order.completed_at || "",
     notes: rawNotes,
   };
 
@@ -11614,6 +16300,52 @@ function getProductionOrderMetadata(order) {
       metadata.lotNumber = line.replace("[meta:lot]", "").trim();
     } else if (line.startsWith("[meta:responsible]") && !order.responsible_name) {
       metadata.responsibleName = line.replace("[meta:responsible]", "").trim();
+    } else if (line.startsWith("[meta:delivery_days]") && !order.delivery_days) {
+      metadata.deliveryDays = line.replace("[meta:delivery_days]", "").trim();
+    } else if (line.startsWith("[meta:bom_structure_id]") && !order.bom_structure_id) {
+      metadata.bomStructureId = line.replace("[meta:bom_structure_id]", "").trim();
+    } else if (line.startsWith("[meta:product_id]") && !metadata.productId) {
+      metadata.productId = line.replace("[meta:product_id]", "").trim();
+    } else if (line.startsWith("[meta:product_code]") && !metadata.productCode) {
+      metadata.productCode = line.replace("[meta:product_code]", "").trim();
+    } else if (line.startsWith("[meta:sale_id]") && !metadata.saleId) {
+      metadata.saleId = line.replace("[meta:sale_id]", "").trim();
+    } else if (line.startsWith("[meta:sale_number]") && !metadata.saleNumber) {
+      metadata.saleNumber = line.replace("[meta:sale_number]", "").trim();
+    } else if (line.startsWith("[meta:customer_name]") && !metadata.customerName) {
+      metadata.customerName = line.replace("[meta:customer_name]", "").trim();
+    } else if (line.startsWith("[meta:production_items]") && !metadata.productionItems.length) {
+      try { metadata.productionItems = JSON.parse(line.replace("[meta:production_items]", "").trim()); } catch {}
+    } else if (line.startsWith("[meta:operation_steps]") && !metadata.operationSteps.length) {
+      try { metadata.operationSteps = JSON.parse(line.replace("[meta:operation_steps]", "").trim()); } catch {}
+    } else if (line.startsWith("[meta:timeline_entries]") && !metadata.timelineEntries.length) {
+      try { metadata.timelineEntries = JSON.parse(line.replace("[meta:timeline_entries]", "").trim()); } catch {}
+    } else if (line.startsWith("[meta:attachments]") && !metadata.attachments.length) {
+      try { metadata.attachments = JSON.parse(line.replace("[meta:attachments]", "").trim()); } catch {}
+    } else if (line.startsWith("[meta:material_plan]") && !metadata.materialPlan.length) {
+      try { metadata.materialPlan = JSON.parse(line.replace("[meta:material_plan]", "").trim()); } catch {}
+    } else if (line.startsWith("[meta:quality_logs]") && !metadata.qualityLogs.length) {
+      try { metadata.qualityLogs = JSON.parse(line.replace("[meta:quality_logs]", "").trim()); } catch {}
+    } else if (line.startsWith("[meta:alerts]") && !metadata.alerts.length) {
+      try { metadata.alerts = JSON.parse(line.replace("[meta:alerts]", "").trim()); } catch {}
+    } else if (line.startsWith("[meta:current_step_index]") && !order.current_step_index) {
+      metadata.currentStepIndex = Number(line.replace("[meta:current_step_index]", "").trim() || 0);
+    } else if (line.startsWith("[meta:produced_quantity]") && !order.produced_quantity) {
+      metadata.producedQuantity = Number(line.replace("[meta:produced_quantity]", "").trim() || 0);
+    } else if (line.startsWith("[meta:defective_quantity]") && !order.defective_quantity) {
+      metadata.defectiveQuantity = Number(line.replace("[meta:defective_quantity]", "").trim() || 0);
+    } else if (line.startsWith("[meta:rework_quantity]") && !order.rework_quantity) {
+      metadata.reworkQuantity = Number(line.replace("[meta:rework_quantity]", "").trim() || 0);
+    } else if (line.startsWith("[meta:estimated_minutes]") && !order.estimated_minutes) {
+      metadata.estimatedMinutes = Number(line.replace("[meta:estimated_minutes]", "").trim() || 0);
+    } else if (line.startsWith("[meta:active_operator]") && !order.active_operator) {
+      metadata.activeOperator = line.replace("[meta:active_operator]", "").trim();
+    } else if (line.startsWith("[meta:started_at]") && !order.started_at) {
+      metadata.startedAt = line.replace("[meta:started_at]", "").trim();
+    } else if (line.startsWith("[meta:paused_at]") && !order.paused_at) {
+      metadata.pausedAt = line.replace("[meta:paused_at]", "").trim();
+    } else if (line.startsWith("[meta:completed_at]") && !order.completed_at) {
+      metadata.completedAt = line.replace("[meta:completed_at]", "").trim();
     }
   });
 
@@ -11623,6 +16355,16 @@ function getProductionOrderMetadata(order) {
     .join("\n")
     .trim();
 
+  if (!metadata.operationSteps.length) {
+    metadata.operationSteps = buildDefaultProductionOperationSteps();
+  }
+  if (!metadata.estimatedMinutes) {
+    metadata.estimatedMinutes = metadata.operationSteps.reduce((total, step) => total + Number(step.estimated_minutes || 0), 0);
+  }
+  if (!metadata.materialPlan.length && metadata.productionItems.length) {
+    metadata.materialPlan = buildProductionMaterialPlan(metadata.productionItems);
+  }
+
   return metadata;
 }
 
@@ -11631,11 +16373,42 @@ function isProductionSchemaCompatibilityError(error) {
   return /column|schema cache|Could not find the .* column/i.test(message);
 }
 
+function isProductionOrderNumberDuplicateError(error) {
+  const message = String(error?.message || "");
+  const details = String(error?.details || "");
+  return error?.code === "23505"
+    && (
+      message.includes("production_orders_order_number_key")
+      || details.includes("order_number")
+      || /duplicate key value violates unique constraint/i.test(message)
+    );
+}
+
 function generateProductionOrderNumber(product) {
   const now = new Date();
-  const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}`;
+  productionOrderNumberCounter = (productionOrderNumberCounter + 1) % 1000;
+  const stamp = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0"),
+    String(now.getHours()).padStart(2, "0"),
+    String(now.getMinutes()).padStart(2, "0"),
+    String(now.getSeconds()).padStart(2, "0"),
+    String(now.getMilliseconds()).padStart(3, "0"),
+  ].join("");
+  const sequence = String(productionOrderNumberCounter).padStart(3, "0");
+  const entropy = generateProductionOrderEntropy();
   const code = String(product?.code || "ERP").replace(/[^A-Za-z0-9]/g, "").slice(0, 6).toUpperCase() || "ERP";
-  return `OP-${code}-${stamp}`;
+  return `OP-${code}-${stamp}-${sequence}${entropy}`;
+}
+
+function generateProductionOrderEntropy() {
+  if (window.crypto?.getRandomValues) {
+    const values = new Uint16Array(1);
+    window.crypto.getRandomValues(values);
+    return values[0].toString(36).toUpperCase().padStart(4, "0").slice(-4);
+  }
+  return Math.floor(Math.random() * 1679616).toString(36).toUpperCase().padStart(4, "0").slice(-4);
 }
 
 function bindProductsModuleEvents() {
@@ -11672,6 +16445,25 @@ function bindProductsModuleEvents() {
   const productForm = document.querySelector("#products-form");
   if (productForm) {
     productForm.addEventListener("submit", handleProductSubmit);
+    productForm.elements.namedItem("has_production_sections")?.addEventListener("change", () => {
+      syncProductSectionsPanel(productForm);
+    });
+    productForm.querySelector("[data-product-add-section]")?.addEventListener("click", () => {
+      const list = productForm.querySelector("[data-product-sections-list]");
+      if (!list) return;
+      list.insertAdjacentHTML("beforeend", renderProductProductionSectionRows([{ id: "", label: "" }]));
+    });
+    productForm.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-product-remove-section]");
+      if (!button || !productForm.contains(button)) return;
+      const row = button.closest("[data-product-section-row]");
+      row?.remove();
+      const list = productForm.querySelector("[data-product-sections-list]");
+      if (list && !list.querySelector("[data-product-section-row]")) {
+        list.innerHTML = renderProductProductionSectionRows([]);
+      }
+    });
+    syncProductSectionsPanel(productForm, []);
   }
 
   const cancelButton = document.querySelector("[data-product-cancel]");
@@ -11725,7 +16517,7 @@ function bindProductsModuleEvents() {
           void queueSystemLog({
             moduleKey: "products",
             action: "mudanca_status",
-            level: "Atencao",
+            level: "Atenção",
             itemAffected: button.dataset.productDeleteId,
             description: "Produto inativado por possuir historico vinculado.",
             entityType: "product",
@@ -11790,12 +16582,22 @@ function bindInventoryModuleEvents() {
   if (cancelButton) {
     cancelButton.addEventListener("click", () => {
       state.inventoryFormVisible = false;
+      state.inventoryMovementProductId = "";
+      state.inventoryMovementSaleOptionId = "";
       renderActiveModule();
     });
   }
 
   const form = document.querySelector("#inventory-movement-form");
   if (form) {
+    form.querySelector("[data-inventory-product-field]")?.addEventListener("change", (event) => {
+      state.inventoryMovementProductId = event.currentTarget.value;
+      state.inventoryMovementSaleOptionId = "";
+      renderActiveModule();
+    });
+    form.querySelector("[data-inventory-sale-option-field]")?.addEventListener("change", (event) => {
+      state.inventoryMovementSaleOptionId = event.currentTarget.value;
+    });
     form.addEventListener("submit", handleInventoryMovementSubmit);
   }
 }
@@ -11858,12 +16660,12 @@ function bindReportsModuleEvents() {
   document.querySelector("[data-reports-refresh]")?.addEventListener("click", async () => {
     await loadAllVisibleData();
     renderActiveModule();
-    showToast("Relatorios atualizados.", "success");
+    showToast("Relatórios atualizados.", "success");
   });
 
   document.querySelector("[data-reports-export]")?.addEventListener("click", () => {
     const snapshot = buildReportsSnapshot();
-    openPrintWindowForHtml(buildReportsExportHtml(snapshot), "Relatorios Gerenciais");
+    openPrintWindowForHtml(buildReportsExportHtml(snapshot), "Relatórios Gerenciais");
   });
 }
 
@@ -11915,6 +16717,9 @@ function bindBomModuleEvents() {
 
   bindDeferredTextFilter("#bom-material-search", (value) => {
     state.bomMaterialSearch = value;
+  });
+  bindDeferredTextFilter("#bom-structure-search", (value) => {
+    state.bomStructureSearch = value;
   });
 
   const materialForm = document.querySelector("#bom-material-form");
@@ -12006,7 +16811,42 @@ function handleBomDraftItemFieldChange(event) {
   const index = Number(event.currentTarget.dataset.bomItemIndex);
   const field = event.currentTarget.dataset.bomItemField;
   if (!state.bomDraftItems[index]) return;
+
+  const refreshBomDraftItemTotal = () => {
+    const totalField = document.querySelector(`[data-bom-item-total="${index}"]`);
+    if (!totalField) return;
+    totalField.value = formatCurrency(getBomDraftItemComputed(state.bomDraftItems[index]).totalCost);
+  };
+
+  if (field === "quantity") {
+    if (event.type === "input") {
+      state.bomDraftItems[index].quantity = event.currentTarget.value;
+      refreshBomDraftItemTotal();
+      return;
+    }
+    const wholeQuantity = Math.max(1, Math.round(Number(event.currentTarget.value || 1)));
+    state.bomDraftItems[index].quantity = String(wholeQuantity);
+    event.currentTarget.value = String(wholeQuantity);
+    refreshBomDraftItemTotal();
+    return;
+  }
+
+  if (field === "unitCost") {
+    state.bomDraftItems[index].unitCost = event.currentTarget.value;
+    refreshBomDraftItemTotal();
+    return;
+  }
+
   state.bomDraftItems[index][field] = event.currentTarget.value;
+  if (field === "sourceKey") {
+    state.bomDraftItems[index].saleOptionId = "";
+    const component = getBomComponentByKey(state.bomDraftItems[index].sourceKey, "");
+    state.bomDraftItems[index].unitCost = component ? String(Number(component.unitCost || 0)) : "";
+  }
+  if (field === "saleOptionId") {
+    const component = getBomComponentByKey(state.bomDraftItems[index].sourceKey, state.bomDraftItems[index].saleOptionId);
+    state.bomDraftItems[index].unitCost = component ? String(Number(component.unitCost || 0)) : "";
+  }
   renderActiveModule();
 }
 
@@ -12017,7 +16857,19 @@ function handleBomStructureDraftFieldChange(event) {
     const product = state.moduleData.products.find((item) => item.id === event.currentTarget.value);
     state.bomStructureDraft.product_code = product?.code || "";
     state.bomStructureDraft.product_name = product?.name || "";
+    state.bomStructureDraft.sale_option_id = "";
+    state.bomStructureDraft.sale_option_code = "";
+    state.bomStructureDraft.sale_option_label = "";
     state.bomStructureDraft.name = product?.name || "";
+    state.bomDraftItems = state.bomDraftItems.map((item) => ({ ...item, productionSectionId: "" }));
+    renderActiveModule();
+  }
+  if (field === "sale_option_id") {
+    const product = state.moduleData.products.find((item) => item.id === state.bomStructureDraft.product_id);
+    const option = findProductSaleOption(product, event.currentTarget.value);
+    state.bomStructureDraft.sale_option_code = option?.code || "";
+    state.bomStructureDraft.sale_option_label = option?.label || "";
+    state.bomStructureDraft.name = option ? `${product?.name || ""} - ${option.label}` : product?.name || "";
     renderActiveModule();
   }
 }
@@ -12030,10 +16882,11 @@ async function handleBomMaterialSubmit(event) {
   const editId = payload.edit_id;
   delete payload.edit_id;
   payload.unit_cost = getCurrencyInputNumber(form, "unit_cost");
-  payload.current_stock = Number(payload.current_stock || 0);
-  payload.minimum_stock = Number(payload.minimum_stock || 0);
+  payload.current_stock = normalizeWholeNumber(payload.current_stock || 0, { min: 0, fallback: 0 });
+  payload.minimum_stock = normalizeWholeNumber(payload.minimum_stock || 0, { min: 0, fallback: 0 });
   payload.description = payload.description || null;
   payload.supplier = payload.supplier || null;
+  payload.category = normalizeCategoryInput(payload.category, "geral");
 
   try {
     const query = editId
@@ -12051,12 +16904,12 @@ async function handleBomMaterialSubmit(event) {
       action: editId ? "edicao" : "criacao",
       level: "Informativo",
       itemAffected: payload.name,
-      description: `Peca/material ${editId ? "atualizado" : "cadastrado"} no BOM.`,
+      description: `Peça/material ${editId ? "atualizado" : "cadastrado"} no BOM.`,
       entityType: "bom_material",
       entityId: editId || payload.code,
       payload,
     });
-    showToast(editId ? "Peca/material atualizado com sucesso." : "Peca/material salvo com sucesso.", "success");
+    showToast(editId ? "Peça/material atualizado com sucesso." : "Peça/material salvo com sucesso.", "success");
   } catch (error) {
     showToast(formatError(error), "danger");
   }
@@ -12071,10 +16924,12 @@ async function handleBomStructureSubmit(event) {
     ...Object.fromEntries(formData.entries()),
   };
   const selectedProduct = state.moduleData.products.find((item) => item.id === payload.product_id);
+  const productionSections = getProductProductionSections(selectedProduct);
   const normalizedItems = state.bomDraftItems
     .map((item) => {
       const computed = getBomDraftItemComputed(item);
       if (!computed.component) return null;
+      const selectedSection = productionSections.find((section) => section.id === item.productionSectionId) || null;
       return {
         source_key: item.sourceKey,
         source_type: computed.component.type,
@@ -12082,6 +16937,13 @@ async function handleBomStructureSubmit(event) {
         code: computed.component.code,
         name: computed.component.name,
         unit: computed.component.unit,
+        sale_option_id: computed.component.saleOption?.id || "",
+        sale_option_code: computed.component.saleOption?.code || "",
+        sale_option_label: computed.component.saleOption?.label || "",
+        production_quantity: computed.component.saleOption?.production_quantity || "",
+        kit_structure_id: computed.component.saleOption?.kit_structure_id || "",
+        production_section_id: selectedSection?.id || "",
+        production_section_label: selectedSection?.label || "",
         quantity: computed.quantity,
         unit_cost: computed.unitCost,
         total_cost: computed.totalCost,
@@ -12091,7 +16953,7 @@ async function handleBomStructureSubmit(event) {
     .filter((item) => item.quantity > 0);
 
   if (!normalizedItems.length) {
-    showToast("Adicione ao menos uma peca ao conjunto.", "warning");
+    showToast("Adicione ao menos uma peça ao conjunto.", "warning");
     return;
   }
 
@@ -12101,21 +16963,30 @@ async function handleBomStructureSubmit(event) {
   }
 
   if (!selectedProduct) {
-    showToast("Produto final nao encontrado.", "danger");
+    showToast("Produto final não encontrado.", "danger");
+    return;
+  }
+  const selectedSaleOption = payload.sale_option_id ? findProductSaleOption(selectedProduct, payload.sale_option_id) : null;
+  if (payload.sale_option_id && !selectedSaleOption) {
+    showToast("Variação do produto final não encontrada.", "danger");
     return;
   }
 
   const editId = payload.edit_id;
   delete payload.edit_id;
-  payload.code = selectedProduct.code || "";
-  payload.name = selectedProduct.name || "";
+  payload.code = selectedSaleOption?.code || selectedProduct.code || "";
+  payload.name = selectedSaleOption ? `${selectedProduct.name} - ${selectedSaleOption.label}` : selectedProduct.name || "";
   payload.product_code = selectedProduct.code || "";
   payload.product_name = selectedProduct.name || "";
-  payload.batch_size = Number(payload.batch_size || 0);
-  payload.height = Number(payload.height || 0);
-  payload.width = Number(payload.width || 0);
-  payload.length = Number(payload.length || 0);
-  payload.weight = Number(payload.weight || 0);
+  payload.category = normalizeCategoryInput(payload.category, "geral");
+  payload.sale_option_id = selectedSaleOption?.id || "";
+  payload.sale_option_code = selectedSaleOption?.code || "";
+  payload.sale_option_label = selectedSaleOption?.label || "";
+  payload.batch_size = normalizeWholeNumber(payload.batch_size || 0, { min: 1, fallback: 1 });
+  payload.height = normalizeWholeNumber(payload.height || 0, { min: 0, fallback: 0 });
+  payload.width = normalizeWholeNumber(payload.width || 0, { min: 0, fallback: 0 });
+  payload.length = normalizeWholeNumber(payload.length || 0, { min: 0, fallback: 0 });
+  payload.weight = normalizeWholeNumber(payload.weight || 0, { min: 0, fallback: 0 });
   payload.total_cost = calculateBomDraftTotal();
   payload.instructions = payload.instructions || null;
   payload.notes = payload.notes || null;
@@ -12184,8 +17055,9 @@ async function handleInventoryMovementSubmit(event) {
   const form = event.currentTarget;
   const formData = new FormData(form);
   const productId = formData.get("product_id")?.toString();
+  const saleOptionId = formData.get("sale_option_id")?.toString() || "";
   const movementType = formData.get("movement_type")?.toString();
-  const quantity = Number(formData.get("quantity") || 0);
+  const quantity = normalizeWholeNumber(formData.get("quantity") || 0, { min: 0, fallback: 0 });
   const machineSerial = formData.get("machine_serial")?.toString().trim();
   const notes = formData.get("notes")?.toString().trim();
 
@@ -12195,27 +17067,33 @@ async function handleInventoryMovementSubmit(event) {
   }
 
   if (!Number.isFinite(quantity) || quantity < 0) {
-    showToast("Informe uma quantidade valida.", "warning");
+    showToast("Informe uma quantidade válida.", "warning");
     return;
   }
 
   if ((movementType === "entry" || movementType === "exit") && quantity === 0) {
-    showToast("Entrada e saida exigem quantidade maior que zero.", "warning");
+    showToast("Entrada e saída exigem quantidade maior que zero.", "warning");
     return;
   }
 
   const product = state.moduleData.products.find((item) => item.id === productId);
   if (!product) {
-    showToast("Produto nao encontrado.", "danger");
+    showToast("Produto não encontrado.", "danger");
     return;
   }
 
-  if (product.category === "finished_product" && !machineSerial) {
-    showToast("Numero de serie e obrigatorio para produtos acabados.", "warning");
+  if (getProductType(product) === "finished_product" && !machineSerial) {
+    showToast("Número de serie e obrigatório para produtos acabados.", "warning");
     return;
   }
 
-  const currentStock = Number(product.current_stock || 0);
+  const saleOption = saleOptionId ? findProductSaleOption(product, saleOptionId) : null;
+  if (saleOptionId && !saleOption) {
+    showToast("Variação do produto não encontrada.", "danger");
+    return;
+  }
+
+  const currentStock = saleOption ? Number(saleOption.current_stock || 0) : Number(product.current_stock || 0);
   let nextStock = currentStock;
 
   if (movementType === "entry") {
@@ -12227,7 +17105,7 @@ async function handleInventoryMovementSubmit(event) {
   }
 
   if (nextStock < 0) {
-    showToast("Nao e permitido deixar o estoque negativo.", "warning");
+    showToast("Não e permitido deixar o estoque negativo.", "warning");
     return;
   }
 
@@ -12235,6 +17113,9 @@ async function handleInventoryMovementSubmit(event) {
     product_id: product.id,
     product_name: product.name,
     product_code: product.code,
+    sale_option_id: saleOption?.id || null,
+    sale_option_code: saleOption?.code || null,
+    sale_option_label: saleOption?.label || null,
     movement_type: movementType,
     quantity,
     batch: product.batch || null,
@@ -12248,10 +17129,12 @@ async function handleInventoryMovementSubmit(event) {
     await persistProductMovement({ product, movementPayload, nextStock });
 
     state.inventoryFormVisible = false;
+    state.inventoryMovementProductId = "";
+    state.inventoryMovementSaleOptionId = "";
     form?.reset();
     await Promise.all([loadInventoryMovementsTable(), loadProductsTable()]);
     renderActiveModule();
-    showToast("Movimentacao registrada com sucesso.", "success");
+    showToast("Movimentação registrada com sucesso.", "success");
   } catch (error) {
     showToast(formatError(error), "danger");
   }
@@ -12260,46 +17143,137 @@ async function handleInventoryMovementSubmit(event) {
 async function handleProductSubmit(event) {
   event.preventDefault();
   const form = event.currentTarget;
+  if (form.dataset.submitting === "true") {
+    return;
+  }
+  form.dataset.submitting = "true";
+  const submitButton = form.querySelector('button[type="submit"]');
+  const previousSubmitLabel = submitButton?.textContent || "";
+  if (submitButton) {
+    submitButton.disabled = true;
+    submitButton.textContent = "Salvando...";
+  }
   const formData = new FormData(form);
   const payload = Object.fromEntries(formData.entries());
   const editId = payload.edit_id;
+  const photoFile = form.elements.namedItem("product_photo_file")?.files?.[0] || null;
   delete payload.edit_id;
+  delete payload.product_photo_file;
+  payload.sale_options = readProductSaleOptionsFromForm(form);
+  payload.has_production_sections = payload.has_production_sections === "true";
+  payload.production_sections = payload.has_production_sections ? readProductProductionSectionsFromForm(form) : [];
+  [
+    "sale_option_code",
+    "sale_option_label",
+    "sale_option_price",
+    "sale_option_production_quantity",
+    "sale_option_current_stock",
+    "sale_option_minimum_stock",
+    "sale_option_kit_structure_id",
+    "sale_options_text",
+    "production_section_id",
+    "production_section_label",
+  ].forEach((key) => delete payload[key]);
 
-  payload.minimum_stock = Number(payload.minimum_stock || 0);
-  payload.current_stock = Number(payload.current_stock || 0);
+  payload.minimum_stock = normalizeWholeNumber(payload.minimum_stock || 0, { min: 0, fallback: 0 });
+  payload.current_stock = normalizeWholeNumber(payload.current_stock || 0, { min: 0, fallback: 0 });
   payload.cost_price = getCurrencyInputNumber(form, "cost_price");
   payload.sale_price = getCurrencyInputNumber(form, "sale_price");
+  payload.available_for_sale = payload.available_for_sale !== "false";
+  payload.category = normalizeCategoryInput(payload.category, "general_products");
+  payload.product_type = normalizeProductTypeInput(payload.product_type || payload.category);
 
-  ["supplier", "batch", "machine_serial", "expiration_date", "location", "description"].forEach((key) => {
+  if (photoFile) {
+    const preparedPhoto = form.elements.namedItem("photo_data_url")?.value || "";
+    if (preparedPhoto) {
+      payload.photo_data_url = preparedPhoto;
+    } else {
+      try {
+        const processedPhoto = await resizeProductImageFile(photoFile);
+        payload.photo_data_url = processedPhoto.dataUrl;
+      } catch (error) {
+        showToast(formatError(error), "warning");
+        form.dataset.submitting = "false";
+        if (submitButton) {
+          submitButton.disabled = false;
+          submitButton.textContent = previousSubmitLabel || "Salvar";
+        }
+        return;
+      }
+    }
+  }
+
+  ["supplier", "batch", "machine_serial", "expiration_date", "location", "description", "photo_data_url"].forEach((key) => {
     if (!payload[key]) {
       payload[key] = null;
     }
   });
 
   try {
-    const query = editId
-      ? state.supabase.from("products").update(payload).eq("id", editId)
-      : state.supabase.from("products").insert(payload);
-    const { error } = await query;
+    const { error } = await persistProductPayload(payload, editId);
     if (error) throw error;
 
     resetProductModuleState();
     await loadTable("products", "products");
+    const bomSyncResult = editId ? await syncBomStructuresForProductChange(editId) : { updatedCount: 0 };
+    if (bomSyncResult.updatedCount) {
+      await loadBomData();
+    }
     renderActiveModule();
     void queueSystemLog({
       moduleKey: "products",
       action: editId ? "edicao" : "criacao",
       level: "Informativo",
       itemAffected: payload.name,
-      description: `Produto ${editId ? "atualizado" : "cadastrado"} com codigo ${payload.code}.`,
+      description: `Produto ${editId ? "atualizado" : "cadastrado"} com código ${payload.code}.`,
       entityType: "product",
       entityId: editId || payload.code,
-      payload,
+      payload: {
+        ...payload,
+        affected_bom_structures: bomSyncResult.updatedCount,
+      },
     });
-    showToast(editId ? "Produto atualizado com sucesso." : "Produto salvo com sucesso.", "success");
+    showToast(
+      editId
+        ? bomSyncResult.updatedCount
+          ? `Produto atualizado e ${bomSyncResult.updatedCount} conjunto(s) recalculado(s).`
+          : "Produto atualizado com sucesso."
+        : "Produto salvo com sucesso.",
+      "success"
+    );
   } catch (error) {
     showToast(formatError(error), "danger");
+  } finally {
+    form.dataset.submitting = "false";
+    if (submitButton) {
+      submitButton.disabled = false;
+      submitButton.textContent = previousSubmitLabel || "Salvar";
+    }
   }
+}
+
+async function persistProductPayload(payload, editId) {
+  const query = editId
+    ? state.supabase.from("products").update(payload).eq("id", editId)
+    : state.supabase.from("products").insert(payload);
+  const result = await query;
+  if (!result.error || !isProductSchemaCompatibilityError(result.error)) {
+    return result;
+  }
+
+  const legacyPayload = { ...payload };
+  delete legacyPayload.available_for_sale;
+  delete legacyPayload.has_production_sections;
+  delete legacyPayload.production_sections;
+  delete legacyPayload.product_type;
+  const legacyQuery = editId
+    ? state.supabase.from("products").update(legacyPayload).eq("id", editId)
+    : state.supabase.from("products").insert(legacyPayload);
+  return legacyQuery;
+}
+
+function isProductSchemaCompatibilityError(error) {
+  return /column|schema cache|Could not find the .* column/i.test(String(error?.message || ""));
 }
 
 async function handleProductMovementSubmit(event) {
@@ -12307,25 +17281,32 @@ async function handleProductMovementSubmit(event) {
   const form = event.currentTarget;
   const formData = new FormData(form);
   const productId = formData.get("product_id")?.toString();
+  const saleOptionId = formData.get("sale_option_id")?.toString() || "";
   const movementType = formData.get("movement_type")?.toString();
-  const movementQuantity = Number(formData.get("movement_quantity") || 0);
+  const movementQuantity = normalizeWholeNumber(formData.get("movement_quantity") || 0, { min: 1, fallback: 0 });
 
   if (!movementQuantity || movementQuantity <= 0) {
-    showToast("Informe uma quantidade valida para movimentar.", "warning");
+    showToast("Informe uma quantidade válida para movimentar.", "warning");
     return;
   }
 
   const product = state.moduleData.products.find((item) => item.id === productId);
   if (!product) {
-    showToast("Produto nao encontrado.", "danger");
+    showToast("Produto não encontrado.", "danger");
     return;
   }
 
-  const currentStock = Number(product.current_stock || 0);
+  const saleOption = saleOptionId ? findProductSaleOption(product, saleOptionId) : null;
+  if (saleOptionId && !saleOption) {
+    showToast("Variação do produto não encontrada.", "danger");
+    return;
+  }
+
+  const currentStock = saleOption ? Number(saleOption.current_stock || 0) : Number(product.current_stock || 0);
   const nextStock = movementType === "entry" ? currentStock + movementQuantity : currentStock - movementQuantity;
 
   if (nextStock < 0) {
-    showToast("A saida nao pode deixar o estoque negativo.", "warning");
+    showToast("A saída não pode deixar o estoque negativo.", "warning");
     return;
   }
 
@@ -12336,6 +17317,9 @@ async function handleProductMovementSubmit(event) {
         product_id: product.id,
         product_name: product.name,
         product_code: product.code,
+        sale_option_id: saleOption?.id || null,
+        sale_option_code: saleOption?.code || null,
+        sale_option_label: saleOption?.label || null,
         movement_type: movementType,
         quantity: movementQuantity,
         batch: product.batch || null,
@@ -12358,35 +17342,91 @@ async function handleProductMovementSubmit(event) {
 }
 
 function populateForm(form, record) {
-  Object.entries(record).forEach(([key, value]) => {
+  const normalizedRecord = form?.id === "products-form"
+    ? {
+        ...record,
+        category: formatCategoryLabel(getProductCategory(record)),
+        product_type: getProductType(record),
+      }
+    : record;
+
+  Object.entries(normalizedRecord).forEach(([key, value]) => {
     const field = form.elements.namedItem(key);
     if (field) {
       field.value = value ?? "";
     }
   });
+
+  const variationsList = form.querySelector("[data-product-variations-list]");
+  if (variationsList) {
+    variationsList.innerHTML = renderProductSaleVariationRows(normalizedRecord.sale_options || [], normalizedRecord);
+    bindCurrencyInputs(variationsList);
+  }
+
+  const hasSectionsField = form.elements.namedItem("has_production_sections");
+  if (hasSectionsField) {
+    hasSectionsField.value = normalizedRecord.has_production_sections ? "true" : "false";
+  }
+  syncProductSectionsPanel(form, normalizedRecord.production_sections || []);
+
+  const photoPreview = form.querySelector("[data-product-photo-preview]");
+  if (photoPreview) {
+    photoPreview.innerHTML = normalizedRecord.photo_data_url
+      ? `<img src="${normalizedRecord.photo_data_url}" alt="Foto do produto" />`
+      : `<span class="muted">Nenhuma foto cadastrada</span>`;
+  }
+}
+
+function syncProductSectionsPanel(form, sections = null) {
+  if (!form) return;
+  const hasSections = form.elements.namedItem("has_production_sections")?.value === "true";
+  const panel = form.querySelector("[data-product-sections-panel]");
+  const list = form.querySelector("[data-product-sections-list]");
+  panel?.classList.toggle("hidden", !hasSections);
+  if (!list) return;
+  if (sections !== null) {
+    list.innerHTML = renderProductProductionSectionRows(hasSections ? sections : []);
+  } else if (hasSections && !list.querySelector("[data-product-section-row]")) {
+    list.innerHTML = renderProductProductionSectionRows([]);
+  }
 }
 
 async function persistProductMovement({ product, movementPayload, nextStock }) {
-  const { error: movementError } = await state.supabase.from("inventory_movements").insert(movementPayload);
+  const movementUnitCost = parseCurrencyInput(movementPayload.unit_cost || 0);
+  const dbMovementPayload = { ...movementPayload };
+  delete dbMovementPayload.unit_cost;
+  const { error: movementError } = await state.supabase.from("inventory_movements").insert(dbMovementPayload);
   if (movementError) throw movementError;
+
+  const saleOptionId = movementPayload.sale_option_id || "";
+  const nextSaleOptions = saleOptionId ? updateProductSaleOptionStock(product, saleOptionId, nextStock) : null;
+  const productUpdate = {
+    last_moved_by_user_id: state.currentUser?.user_id || null,
+    last_moved_by_name: getLoggedUserName(null),
+    last_movement_at: new Date().toISOString(),
+  };
+  if (movementPayload.movement_type === "entry" && movementUnitCost > 0) {
+    productUpdate.cost_price = movementUnitCost;
+  }
+  if (nextSaleOptions) {
+    productUpdate.sale_options = nextSaleOptions;
+  } else {
+    productUpdate.current_stock = nextStock;
+  }
 
   const { error: productError } = await state.supabase
     .from("products")
-    .update({
-      current_stock: nextStock,
-      last_moved_by_user_id: state.currentUser?.user_id || null,
-      last_moved_by_name: getLoggedUserName(null),
-      last_movement_at: new Date().toISOString(),
-    })
+    .update(productUpdate)
     .eq("id", product.id);
   if (productError) throw productError;
 
+  const itemLabel = movementPayload.sale_option_label ? `${product.name} - ${movementPayload.sale_option_label}` : product.name;
   void queueSystemLog({
     moduleKey: "inventory",
     action: "movimentacao_estoque",
-    level: movementPayload.movement_type === "exit" ? "Atencao" : "Informativo",
-    itemAffected: product.name,
-    description: `Movimentacao ${movementPayload.movement_type} de ${formatQuantity(movementPayload.quantity)} para ${product.name}.`,
+    level: movementPayload.movement_type === "exit" ? "Atenção" : "Informativo",
+    itemAffected: itemLabel,
+    description: `Movimentação ${movementPayload.movement_type} de ${formatQuantity(movementPayload.quantity)} para ${itemLabel}.`,
     entityType: "product",
     entityId: product.id,
     payload: { movement: movementPayload, next_stock: nextStock },
@@ -12400,6 +17440,15 @@ function resetProductForm(form) {
   if (editField) {
     editField.value = "";
   }
+  const photoPreview = form.querySelector("[data-product-photo-preview]");
+  if (photoPreview) {
+    photoPreview.innerHTML = `<span class="muted">Nenhuma foto cadastrada</span>`;
+  }
+  const hasSectionsField = form.elements.namedItem("has_production_sections");
+  if (hasSectionsField) {
+    hasSectionsField.value = "false";
+  }
+  syncProductSectionsPanel(form, []);
 }
 
 function resetProductModuleState() {
@@ -12484,13 +17533,13 @@ function bindPurchaseStatusActions() {
         void queueSystemLog({
           moduleKey: "purchases",
           action: "mudanca_status",
-          level: "Atencao",
+          level: "Atenção",
           itemAffected: button.dataset.purchaseId,
-          description: `Status da solicitacao alterado para ${button.dataset.purchaseStatus}.`,
+          description: `Status da solicitação alterado para ${button.dataset.purchaseStatus}.`,
           entityType: "purchase_request",
           entityId: button.dataset.purchaseId,
         });
-        showToast("Status da solicitacao atualizado.", "success");
+        showToast("Status da solicitação atualizado.", "success");
       } catch (error) {
         showToast(formatError(error), "danger");
       }
@@ -12615,7 +17664,7 @@ function bindPermissionEvents() {
           action: "exclusao",
           level: "Critico",
           itemAffected: button.dataset.deletePermissionRole,
-          description: "Papel de permissao excluido.",
+          description: "Papel de permissão excluido.",
           entityType: "permission_role",
           entityId: button.dataset.deletePermissionRole,
         });
@@ -12672,11 +17721,11 @@ function bindPermissionEvents() {
           action: "mudanca_status",
           level: "Critico",
           itemAffected: button.dataset.deactivateStaffUser,
-          description: "Funcionario desativado.",
+          description: "Funcionário desativado.",
           entityType: "staff_user",
           entityId: button.dataset.deactivateStaffUser,
         });
-        showToast("Funcionario desativado.", "success");
+        showToast("Funcionário desativado.", "success");
       } catch (error) {
         showToast(formatError(error), "danger");
       }
@@ -12698,11 +17747,11 @@ function bindPermissionEvents() {
           action: "exclusao",
           level: "Critico",
           itemAffected: button.dataset.deleteStaffUser,
-          description: "Funcionario inativo excluido.",
+          description: "Funcionário inativo excluido.",
           entityType: "staff_user",
           entityId: button.dataset.deleteStaffUser,
         });
-        showToast("Funcionario inativo excluido com sucesso.", "success");
+        showToast("Funcionário inativo excluido com sucesso.", "success");
       } catch (error) {
         showToast(formatError(error), "danger");
       }
@@ -12725,7 +17774,7 @@ function bindVpsControlEvents() {
       await enqueueVpsAction("refresh_snapshot", "server", "primary");
       await loadVpsControlData();
       renderActiveModule();
-      showToast("Atualizacao da VPS solicitada.", "success");
+      showToast("Atualização da VPS solicitada.", "success");
     } catch (error) {
       showToast(formatError(error), "danger");
     }
@@ -12775,7 +17824,7 @@ function bindVpsControlEvents() {
         await enqueueVpsAction(actionType, targetType, targetName, payload);
         await loadVpsControlData();
         renderActiveModule();
-        showToast("Acao enviada para a fila segura da VPS.", "success");
+        showToast("Ação enviada para a fila segura da VPS.", "success");
       } catch (error) {
         showToast(formatError(error), "danger");
       }
@@ -12813,7 +17862,7 @@ async function enqueueVpsAction(actionType, targetType, targetName, payload = {}
     action: "acao_critica_sistema",
     level: "Critico",
     itemAffected: `${targetType}:${targetName}`,
-    description: `Acao VPS enfileirada: ${actionType}.`,
+    description: `Ação VPS enfileirada: ${actionType}.`,
     entityType: targetType,
     entityId: targetName,
     payload: { actionType, targetType, targetName, payload },
@@ -12857,7 +17906,7 @@ async function handlePermissionRoleSubmit(event) {
       action: "alteracao_permissao",
       level: "Critico",
       itemAffected: payload.p_name,
-      description: `Papel de permissao salvo/atualizado: ${payload.p_name}.`,
+      description: `Papel de permissão salvo/atualizado: ${payload.p_name}.`,
       entityType: "permission_role",
       entityId: payload.p_role_id || payload.p_name,
       payload,
@@ -12917,7 +17966,7 @@ async function handleEmployeeSubmit(event) {
       action: "alteracao_permissao",
       level: "Critico",
       itemAffected: payload.p_full_name,
-      description: `Cadastro de funcionario ${userId ? "atualizado" : "criado"} com papel de permissao.`,
+      description: `Cadastro de funcionário ${userId ? "atualizado" : "criado"} com papel de permissão.`,
       entityType: "staff_user",
       entityId: userId || payload.p_login_code,
       payload: {
@@ -12928,7 +17977,7 @@ async function handleEmployeeSubmit(event) {
         is_active: payload.p_is_active,
       },
     });
-    showToast(userId ? "Funcionario atualizado com sucesso." : "Funcionario cadastrado com sucesso.", "success");
+    showToast(userId ? "Funcionário atualizado com sucesso." : "Funcionário cadastrado com sucesso.", "success");
   } catch (error) {
     showToast(formatError(error), "danger");
   }
@@ -12941,7 +17990,7 @@ function watchPurchaseRequests() {
   if (latestPending && latestPending.id !== state.lastPurchaseNotificationId) {
     state.lastPurchaseNotificationId = latestPending.id;
     const metadata = getPurchaseRequestMetadata(latestPending);
-    showPurchaseNotification(`Nova solicitacao: ${metadata.primaryItemLabel || "item"} para ${metadata.department || "-"}.`, "created");
+    showPurchaseNotification(`Nova solicitação: ${metadata.primaryItemLabel || "item"} para ${metadata.department || "-"}.`, "created");
   }
 }
 
@@ -12956,7 +18005,7 @@ function subscribeToPurchaseNotifications() {
       { event: "INSERT", schema: "public", table: "purchase_requests" },
       async (payload) => {
         const metadata = getPurchaseRequestMetadata(payload.new);
-        showPurchaseNotification(`Nova solicitacao: ${metadata.primaryItemLabel || "item"} para ${metadata.department || "-"}.`, "created");
+        showPurchaseNotification(`Nova solicitação: ${metadata.primaryItemLabel || "item"} para ${metadata.department || "-"}.`, "created");
         await loadTable("purchase_requests", "purchases");
         if (state.activeModule === "purchases" || state.activeModule === "dashboard") {
           renderActiveModule();
@@ -12982,6 +18031,11 @@ function showToast(message, type = "success") {
     return;
   }
 
+  if (type === "warning" || type === "danger") {
+    openAppFeedbackModal(message, type);
+    return;
+  }
+
   elements.notificationBanner.textContent = message;
   elements.notificationBanner.classList.remove("hidden");
   elements.notificationBanner.classList.remove("success", "warning", "danger");
@@ -12995,6 +18049,69 @@ function showToast(message, type = "success") {
 
 function shouldUseAuthFeedbackModal() {
   return elements.authScreen.classList.contains("active");
+}
+
+function openAppFeedbackModal(message, type = "warning", focusTarget = null) {
+  const isDanger = type === "danger";
+  const isWarning = type === "warning";
+  elements.appFeedbackIcon.textContent = isDanger ? "!" : "•";
+  elements.appFeedbackIcon.classList.toggle("success", false);
+  elements.appFeedbackIcon.classList.toggle("warning", isWarning);
+  elements.appFeedbackTitle.textContent = isDanger ? "Erro" : "Aviso";
+  elements.appFeedbackMessage.textContent = String(message || "Preencha os campos obrigatórios.");
+  elements.appFeedbackModal.classList.remove("hidden");
+  elements.appFeedbackModal.setAttribute("aria-hidden", "false");
+  openAppFeedbackModal.focusTarget = focusTarget || null;
+  window.setTimeout(() => elements.appFeedbackClose?.focus(), 0);
+}
+
+function closeAppFeedbackModal() {
+  elements.appFeedbackModal.classList.add("hidden");
+  elements.appFeedbackModal.setAttribute("aria-hidden", "true");
+  const focusTarget = openAppFeedbackModal.focusTarget;
+  openAppFeedbackModal.focusTarget = null;
+  if (focusTarget && typeof focusTarget.focus === "function") {
+    window.setTimeout(() => focusTarget.focus(), 0);
+  }
+}
+
+function handleInvalidFormField(event) {
+  const field = event.target;
+  if (!(field instanceof HTMLInputElement || field instanceof HTMLSelectElement || field instanceof HTMLTextAreaElement)) {
+    return;
+  }
+
+  event.preventDefault();
+  openAppFeedbackModal(buildRequiredFieldMessage(field), "warning", field);
+}
+
+function buildRequiredFieldMessage(field) {
+  const label = getFieldLabelText(field);
+  if (field.validity?.valueMissing) {
+    if (field instanceof HTMLSelectElement) {
+      return label ? `Selecione ${label}.` : "Selecione uma opção.";
+    }
+    if (field.type === "checkbox" || field.type === "radio") {
+      return label ? `Marque ${label}.` : "Marque a opção obrigatória.";
+    }
+    return label ? `Preencha ${label}.` : "Preencha o campo obrigatório.";
+  }
+  return field.validationMessage || "Verifique o campo informado.";
+}
+
+function getFieldLabelText(field) {
+  const explicitLabel = field.id ? document.querySelector(`label[for="${CSS.escape(field.id)}"]`) : null;
+  const wrappingLabel = field.closest("label");
+  const label = explicitLabel || wrappingLabel;
+  if (!label) return field.getAttribute("placeholder") || field.name || "";
+
+  const clone = label.cloneNode(true);
+  clone.querySelectorAll("input, select, textarea, button").forEach((item) => item.remove());
+  return clone.textContent
+    .replace(/\*/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
 }
 
 function openAuthFeedbackModal(message, type = "success") {
@@ -13020,13 +18137,13 @@ function normalizeAuthFeedbackMessage(message, type) {
 
   const normalizedMessage = String(message || "");
   if (
-    normalizedMessage.toLowerCase().includes("codigo ou senha invalidos")
-    || normalizedMessage.toLowerCase().includes("credenciais invalidas")
+    normalizedMessage.toLowerCase().includes("código ou senha invalidos")
+    || normalizedMessage.toLowerCase().includes("credenciais inválidas")
   ) {
-    return `Usuario ou senha invalidos. Apos ${LOGIN_MAX_ATTEMPTS} tentativas, o acesso e bloqueado temporariamente.`;
+    return `Usuário ou senha invalidos. Apos ${LOGIN_MAX_ATTEMPTS} tentativas, o acesso e bloqueado temporariamente.`;
   }
 
-  return normalizedMessage || "Nao foi possivel concluir a autenticacao.";
+  return normalizedMessage || "Não foi possível concluir a autenticação.";
 }
 
 function getNotificationAudioContext() {
@@ -13250,6 +18367,7 @@ window.CAPSFARMA_MODULE_BRIDGE = {
     formatDateTime,
     formatCurrency,
     formatQuantity,
+    formatWholeQuantity,
     formatFileSize,
     formatError,
     noPermissionTemplate,
@@ -13269,7 +18387,12 @@ window.CAPSFARMA_MODULE_BRIDGE = {
     renderProductMovementPanel,
     productStatusCell,
     productCategoryCell,
+    productTypeCell,
     productStockCell,
+    getProductType,
+    getProductCategory,
+    formatProductTypeLabel,
+    normalizeProductSaleOptions,
     renderLastMovementUserCell,
     productActionCell,
     getProductionMachiningOrders,
@@ -13282,12 +18405,35 @@ window.CAPSFARMA_MODULE_BRIDGE = {
     renderOptions,
     statusCell,
     createEmptyProductionDraft,
+    createProductionOperationConfigDraft,
+    resetProductionOperationConfigDraft,
+    syncProductionOperationConfigDraftFromForm,
+    addProductionOperationConfigStep,
+    removeProductionOperationConfigStep,
+    restoreDefaultProductionOperationConfig,
+    handleProductionOperationConfigSubmit,
     handleProductionSubmit,
     syncProductionDraftFromForm,
     resetProductionFormState,
+    renderProductSaleVariationRows,
+    buildProductCategoryOptions,
+    getSalesItemBomDescription,
+    renderSalesItemBomDescription,
+    isProductVisibleInCommercialDocuments,
+    getInventoryMovementBomDescription,
+    renderInventoryMovementBomDescription,
     handleProductionProductSelection,
     hydrateProductionDraft,
     handleProductionStart,
+    enterProductionFocusMode,
+    exitProductionFocusMode,
+    handleProductionPrint,
+    handleProductionOperationAdvance,
+    getProductionOperationStepLabel,
+    getProductionOperationActionLabel,
+    getProductionStatusLabel,
+    buildProductionMaterialPlan,
+    showProductionNotification,
     handleMachiningStepAdvance,
     handleMachiningStepOperatorChange,
     getPurchaseRequestMetadata,
@@ -13301,17 +18447,43 @@ window.CAPSFARMA_MODULE_BRIDGE = {
     hydratePurchaseDraft,
     hydratePurchaseConclusionDraft,
     updatePurchaseRequestStatus,
+    getPurchaseConclusionStockEntries,
     showPurchaseNotification,
     resetPurchaseConclusionState,
     notifyPurchaseRequester,
     buildPurchaseRequesterMessage,
     handlePurchaseConclusionSubmit,
     syncPurchaseConclusionDraftFromForm,
+    processPurchaseStockEntries,
     handlePurchaseFileSelection,
     removePurchaseFile,
+    addPurchaseInstallment,
+    removePurchaseInstallment,
+    handlePurchaseInstallmentFieldChange,
+    handlePurchaseInstallmentFileSelection,
+    removePurchaseInstallmentFile,
     handlePurchaseItemFieldChange,
     purchaseUrgencyCell,
     purchaseStatusCell,
+    createEmptyPayablesFilters,
+    createEmptyPayableDraft,
+    createEmptyPayablePaymentDraft,
+    getPayableCategoryOptions,
+    getPayableFrequencyOptions,
+    getPayableTypeLabel,
+    getPayableMetadata,
+    getPayablesSnapshot,
+    hydratePayableDraft,
+    hydratePayablePaymentDraft,
+    resetPayableDraftState,
+    resetPayablePaymentDraftState,
+    handlePayableAttachmentSelection,
+    removePayableAttachment,
+    handlePayableSubmit,
+    handlePayablePaymentSubmit,
+    cancelPayableRecord,
+    payableStatusCell,
+    showPayableNotification,
     renderInventoryMovementForm,
     inventoryMovementTypeCell,
     handleInventoryMovementSubmit,
@@ -13324,11 +18496,15 @@ window.CAPSFARMA_MODULE_BRIDGE = {
     deleteButtonCell,
     bomStructureActionCell,
     formatBomCategory,
+    buildBomMaterialCategoryOptions,
     materialStatusCell,
     bomStructureStatusCell,
     createEmptyBomDraftItem,
     createEmptyBomStructureDraft,
     buildBomComponentOptions,
+    getBomDraftItemVariationOptions,
+    getBomFinalProductVariationOptions,
+    getBomFinalProductProductionSections,
     getBomDraftItemComputed,
     calculateBomDraftTotal,
     getFileExtensionLabel,
@@ -13433,13 +18609,25 @@ window.CAPSFARMA_MODULE_BRIDGE = {
     createDefaultSalesTemplate,
     createEmptySalesDraft,
     createEmptySalesItemDraft,
+    createEmptySalesPaymentCondition,
     createEmptySalesContractDraft,
     getPaymentMethodLabel,
     getSaleMetadata,
     getSalesDraftTotals,
+    getSalesPixDiscountPercent,
+    getSalesPaymentConditionsForDisplay,
+    getSalesPaymentConditionsLabel,
+    formatPercent,
+    updateSalesDraftAmountDisplays,
+    normalizeProductSaleOptions,
+    renderSalesItemBomDescription,
+    formatWholeQuantity,
     getSalesTemplate,
+    addDaysToIsoDate,
     getSalesTemplatePlaceholderList,
+    getSalesTemplatePdfSize,
     resolveSalesTemplateContent,
+    openSalesTemplatePdf,
     openSalesDocumentPreview,
     closeSalesDocumentPreview,
     openPrintWindowForHtml,
@@ -13452,6 +18640,7 @@ window.CAPSFARMA_MODULE_BRIDGE = {
     hydrateSalesDraft,
     hydrateSalesContractDraft,
     finalizeSaleRecord,
+    sendSaleToProduction,
     handleSalesContractSubmit,
     syncSalesContractDraftFromForm,
     resetSalesContractFormState,
@@ -13468,12 +18657,17 @@ window.CAPSFARMA_MODULE_BRIDGE = {
     renderModuleNav,
     bindDeferredTextFilter,
     bindDeferredSelectFilter,
+    resizeProductImageFile,
     handleProductSubmit,
     resetProductForm,
     populateForm,
+    renderProductProductionSectionRows,
+    syncProductSectionsPanel,
     bindCurrencyInputs,
     isProductLinkedDeleteError,
     loadTable,
+    upsertModuleRecord,
+    removeModuleRecord,
     queueSystemLog,
     showToast,
     handleProductMovementSubmit,

@@ -7,7 +7,8 @@ Data da validacao tecnica: 2026-04-10
 - Web na porta 8080 respondendo com healthcheck e HTML principal.
 - Stack local do Supabase ativa e saudavel em Docker.
 - Agente VPS ativo em systemd.
-- Backup SQL gerado com sucesso em `backups/latest.sql`.
+- Backup SQL portavel do schema `public` gerado com sucesso em `backups/latest.sql`.
+- Restore de teste agora pode ser validado em banco temporario isolado com `npm run ops:verify-restore`.
 - Funcoes criticas do banco presentes:
   - `login_user`
   - `get_my_permissions`
@@ -57,7 +58,7 @@ Data da validacao tecnica: 2026-04-10
 - Validar permissoes reais por setor com usuarios nao administradores.
 - Validar impressao e documentos comerciais no fluxo real da empresa.
 - Validar concorrencia basica com pelo menos 2 usuarios simultaneos.
-- Executar um restore de teste em ambiente separado antes de confiar 100% no backup.
+- Executar `npm run ops:verify-restore` com o backup mais recente antes de confiar 100% no backup.
 
 ## Decisao tecnica
 

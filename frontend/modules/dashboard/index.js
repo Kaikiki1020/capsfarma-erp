@@ -1,7 +1,7 @@
 function getBridge() {
   const bridge = window.CAPSFARMA_MODULE_BRIDGE;
   if (!bridge) {
-    throw new Error("Bridge modular do ERP indisponivel.");
+    throw new Error("Bridge modular do ERP indisponível.");
   }
   return bridge;
 }
@@ -31,7 +31,7 @@ export default {
           <div>
             <p class="eyebrow muted">Visao estrategica do negocio</p>
             <h3>Dashboard do Administrador</h3>
-            <p class="muted">Leitura rapida de lucro, operacao, riscos e desempenho geral em um unico painel.</p>
+            <p class="muted">Leitura rápida de lucro, operação, riscos e desempenho geral em um único painel.</p>
           </div>
           <div class="module-head-actions dashboard-head-actions">
             <div class="dashboard-updated-badge">
@@ -86,10 +86,10 @@ export default {
           <div class="dashboard-block-header">
             <div>
               <h4>Alertas Prioritarios</h4>
-              <p class="muted">Problemas que exigem acao imediata ou acompanhamento de perto.</p>
+              <p class="muted">Problemas que exigem ação imediata ou acompanhamento de perto.</p>
             </div>
             <span class="status-chip ${snapshot.alerts.length ? "status-pending" : "status-completed"}">
-              ${snapshot.alerts.length ? `${snapshot.alerts.length} alerta(s)` : "Operacao estavel"}
+              ${snapshot.alerts.length ? `${snapshot.alerts.length} alerta(s)` : "Operação estável"}
             </span>
           </div>
           <div class="dashboard-alert-list">
@@ -120,7 +120,7 @@ export default {
             <section class="dashboard-block">
               <div class="dashboard-block-header">
                 <div>
-                  <h4>Producao</h4>
+                  <h4>Produção</h4>
                   <p class="muted">Volume produzido por periodo e tempo medio para concluir ordens.</p>
                 </div>
               </div>
@@ -131,11 +131,11 @@ export default {
               })}
               <div class="dashboard-chart-metrics">
                 <article class="dashboard-stat-card">
-                  <span class="muted">Tempo medio de producao</span>
+                  <span class="muted">Tempo medio de produção</span>
                   <strong>${snapshot.productionAverageTimeLabel}</strong>
                 </article>
                 <article class="dashboard-stat-card">
-                  <span class="muted">Ordens concluidas</span>
+                  <span class="muted">Ordens concluídas</span>
                   <strong>${snapshot.productionCompletedCount}</strong>
                 </article>
               </div>
@@ -145,7 +145,7 @@ export default {
               <div class="dashboard-block-header">
                 <div>
                   <h4>Pedidos Recentes</h4>
-                  <p class="muted">Pedidos mais relevantes com status, prioridade e atalhos de acao.</p>
+                  <p class="muted">Pedidos mais relevantes com status, prioridade e atalhos de ação.</p>
                 </div>
               </div>
               <div class="table-wrapper dashboard-orders-table">
@@ -194,7 +194,7 @@ export default {
               <div class="dashboard-block-header">
                 <div>
                   <h4>Comercial</h4>
-                  <p class="muted">Pedidos por periodo com leitura rapida de volume e ticket medio.</p>
+                  <p class="muted">Pedidos por periodo com leitura rápida de volume e ticket medio.</p>
                 </div>
               </div>
               ${renderDashboardBarChart({
@@ -217,7 +217,7 @@ export default {
             <section class="dashboard-block">
               <div class="dashboard-block-header">
                 <div>
-                  <h4>Pipeline da Producao</h4>
+                  <h4>Pipeline da Produção</h4>
                   <p class="muted">Fluxo resumido por etapa com destaque para gargalos.</p>
                 </div>
               </div>
@@ -248,9 +248,9 @@ export default {
               <div class="dashboard-block-header">
                 <div>
                   <h4>Estoque Critico</h4>
-                  <p class="muted">Itens baixos ou zerados que podem afetar a operacao.</p>
+                  <p class="muted">Itens baixos ou zerados que podem afetar a operação.</p>
                 </div>
-                <button class="ghost-button" type="button" data-dashboard-module="inventory">Ir para modulo</button>
+                <button class="ghost-button" type="button" data-dashboard-module="inventory">Ir para módulo</button>
               </div>
               <div class="dashboard-list">
                 ${
@@ -259,7 +259,7 @@ export default {
                       <article class="dashboard-list-item dashboard-stock-alert ${item.level}">
                         <div>
                           <strong>${escapeHtml(item.name)}</strong>
-                          <span class="muted">Saldo ${formatQuantity(item.currentStock)} ${escapeHtml(item.unit)} | Minimo ${formatQuantity(item.minimumStock)} ${escapeHtml(item.unit)}</span>
+                          <span class="muted">Saldo ${formatQuantity(item.currentStock)} ${escapeHtml(item.unit)} | Mínimo ${formatQuantity(item.minimumStock)} ${escapeHtml(item.unit)}</span>
                         </div>
                         <span class="status-chip ${item.level === "danger" ? "status-cancelled" : "status-pending"}">
                           ${item.level === "danger" ? "Zerado" : "Baixo"}
@@ -289,10 +289,10 @@ export default {
     } = bridge.helpers;
 
     document.querySelectorAll("[data-dashboard-range]").forEach((button) => {
-      button.addEventListener("click", () => {
+      button.addEventListener("click", async () => {
         state.dashboardRange = button.dataset.dashboardRange || "30d";
         if (state.dashboardRange !== "custom") {
-          renderActiveModule();
+          await refreshDashboardData();
           return;
         }
 
@@ -302,20 +302,20 @@ export default {
         if (!state.dashboardCustomRange.from) {
           state.dashboardCustomRange.from = getDateShiftedIso(state.dashboardCustomRange.to, -29);
         }
-        renderActiveModule();
+        await refreshDashboardData();
       });
     });
 
-    document.querySelector("#dashboard-range-from")?.addEventListener("change", (event) => {
+    document.querySelector("#dashboard-range-from")?.addEventListener("change", async (event) => {
       state.dashboardRange = "custom";
       state.dashboardCustomRange.from = event.currentTarget.value;
-      renderActiveModule();
+      await refreshDashboardData();
     });
 
-    document.querySelector("#dashboard-range-to")?.addEventListener("change", (event) => {
+    document.querySelector("#dashboard-range-to")?.addEventListener("change", async (event) => {
       state.dashboardRange = "custom";
       state.dashboardCustomRange.to = event.currentTarget.value;
-      renderActiveModule();
+      await refreshDashboardData();
     });
 
     document.querySelector("[data-dashboard-refresh]")?.addEventListener("click", async () => {

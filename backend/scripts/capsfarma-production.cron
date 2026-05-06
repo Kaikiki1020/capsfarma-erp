@@ -1,0 +1,12 @@
+SHELL=/bin/bash
+PATH=/home/capsadmin/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Backup diario do banco as 02:10 UTC, com retencao local de 14 dias.
+10 2 * * * /home/capsadmin/capsfarma-erp/backend/scripts/production-backup-cron.sh
+
+# Smoke test operacional a cada 15 minutos.
+*/15 * * * * /home/capsadmin/capsfarma-erp/backend/scripts/production-smoke-cron.sh
+
+# Reaplica firewall de portas internas apos reboot e periodicamente, caso Docker recrie chains.
+@reboot sleep 60 && /home/capsadmin/capsfarma-erp/backend/scripts/production-firewall-cron.sh
+*/10 * * * * /home/capsadmin/capsfarma-erp/backend/scripts/production-firewall-cron.sh

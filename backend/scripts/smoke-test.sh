@@ -19,7 +19,8 @@ echo "[1/5] Healthcheck web"
 curl -fsS "${APP_BASE_URL}/healthz" >/dev/null
 
 echo "[2/5] HTML principal"
-curl -fsS "${APP_BASE_URL}/" | grep -q "ERP-CAPSFARMA"
+HTML_CONTENT="$(curl -fsS "${APP_BASE_URL}/")"
+grep -q "ERP-CAPSFARMA" <<< "${HTML_CONTENT}"
 
 echo "[3/5] API Supabase"
 curl -fsS "${SUPABASE_URL}/rest/v1/" -H "apikey: ${SUPABASE_ANON_KEY}" >/dev/null
@@ -31,7 +32,7 @@ docker exec -i "${DB_CONTAINER}" psql -U postgres -d postgres -tAc \
 
 echo "[5/5] Tabelas operacionais"
 docker exec -i "${DB_CONTAINER}" psql -U postgres -d postgres -tAc \
-  "select count(*) from pg_tables where schemaname='public' and tablename in ('app_users','products','sales','service_orders','purchase_requests','customers');" \
-  | grep -qx "6"
+  "select count(*) from pg_tables where schemaname='public' and tablename in ('app_users','products','sales','service_orders','purchase_requests','customers','accounts_payable');" \
+  | grep -qx "7"
 
 echo "Smoke test concluido com sucesso."

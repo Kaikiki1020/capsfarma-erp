@@ -1,12 +1,70 @@
 function getBridge() {
   const bridge = window.CAPSFARMA_MODULE_BRIDGE;
   if (!bridge) {
-    throw new Error("Bridge modular do ERP indisponivel.");
+    throw new Error("Bridge modular do ERP indisponível.");
   }
   return bridge;
 }
 
+const MACHINING_MACHINES_STORAGE_KEY = "capsfarma_machining_machines";
+
+function readMachiningMachines() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(MACHINING_MACHINES_STORAGE_KEY) || "[]");
+    return Array.isArray(parsed)
+      ? parsed
+          .map((machine) => ({
+            id: String(machine.id || `mach-machine-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`),
+            name: String(machine.name || "").trim(),
+            code: String(machine.code || "").trim(),
+          }))
+          .filter((machine) => machine.name)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistMachiningMachines(machines) {
+  const normalized = (machines || [])
+    .map((machine) => ({
+      id: String(machine.id || `mach-machine-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`),
+      name: String(machine.name || "").trim(),
+      code: String(machine.code || "").trim(),
+    }))
+    .filter((machine) => machine.name);
+  localStorage.setItem(MACHINING_MACHINES_STORAGE_KEY, JSON.stringify(normalized));
+  return normalized;
+}
+
+function getMachiningMachineOptions(state) {
+  const registeredMachines = readMachiningMachines();
+  const processMachines = (state.moduleData.machiningPieces || [])
+    .flatMap((piece) => piece.processes || [])
+    .map((process) => String(process.machine || "").trim())
+    .filter(Boolean)
+    .map((name) => ({ id: `legacy-${name.toLowerCase()}`, name, code: "" }));
+  const byName = new Map();
+  [...registeredMachines, ...processMachines].forEach((machine) => {
+    const key = machine.name.toLowerCase();
+    if (!byName.has(key)) byName.set(key, machine);
+  });
+  return Array.from(byName.values()).sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function getFinishedProductLabel(product) {
+  if (!product) return "";
+  const code = product.code ? ` (${product.code})` : "";
+  const stock = Number.isFinite(Number(product.current_stock)) ? ` • Estoque ${Number(product.current_stock)}` : "";
+  return `${product.name}${code}${stock}`;
+}
+
 function renderMachiningProcessDraftRow(process, index, state, helpers) {
+  const machineOptions = getMachiningMachineOptions(state).map((machine) => ({
+    value: machine.name,
+    label: machine.code ? `${machine.name} (${machine.code})` : machine.name,
+  }));
+
   return `
     <article class="machining-process-card">
       <div class="machining-process-card-head">
@@ -27,12 +85,15 @@ function renderMachiningProcessDraftRow(process, index, state, helpers) {
           <input data-machining-process-field="name" data-machining-process-index="${index}" type="text" value="${helpers.escapeHtml(process.name)}" placeholder="Ex.: Corte" />
         </label>
         <label>
-          Maquina
-          <input data-machining-process-field="machine" data-machining-process-index="${index}" type="text" value="${helpers.escapeHtml(process.machine)}" />
+          Máquina
+          <select data-machining-process-field="machine" data-machining-process-index="${index}">
+            <option value="">Selecione a máquina</option>
+            ${helpers.renderOptions(machineOptions, process.machine || "")}
+          </select>
         </label>
         <label>
           Operador
-          <input data-machining-process-field="operator" data-machining-process-index="${index}" type="text" value="${helpers.escapeHtml(process.operator)}" />
+          <input type="text" value="Automático ao iniciar" readonly />
         </label>
         <label>
           Tempo Estimado (min)
@@ -42,8 +103,8 @@ function renderMachiningProcessDraftRow(process, index, state, helpers) {
 
       <div class="machining-process-grid machining-process-grid-notes">
         <label>
-          Observacoes
-          <textarea data-machining-process-field="notes" data-machining-process-index="${index}" placeholder="Informacoes operacionais">${helpers.escapeHtml(process.notes)}</textarea>
+          Observações
+          <textarea data-machining-process-field="notes" data-machining-process-index="${index}" placeholder="Informações operacionais">${helpers.escapeHtml(process.notes)}</textarea>
         </label>
       </div>
     </article>
@@ -53,13 +114,18 @@ function renderMachiningProcessDraftRow(process, index, state, helpers) {
 function renderMachiningForm(state, helpers) {
   const totalMinutes = helpers.getMachiningDraftTotalMinutes();
   const processCount = state.machiningDraft.processes.length;
+  const selectedFinishedProduct = (state.moduleData.products || [])
+    .find((product) => product.id === state.machiningDraft.finished_product_id);
+  const finishedProductLabel = selectedFinishedProduct
+    ? getFinishedProductLabel(selectedFinishedProduct)
+    : state.machiningDraft.finished_name || "";
 
   return `
     <div class="machining-form-header">
       <div>
-        <p class="eyebrow muted">Nova Peca</p>
-        <h4>${state.machiningDraft.edit_id ? "Editar Peca" : "Nova Peca"}</h4>
-        <p class="muted">Dados da peca e processos de fabricacao em sequencia controlada.</p>
+        <p class="eyebrow muted">Nova Peça</p>
+        <h4>${state.machiningDraft.edit_id ? "Editar Peça" : "Nova Peça"}</h4>
+        <p class="muted">Dados da peça e processos de fabricação em sequência controlada.</p>
       </div>
       <div class="machining-form-summary">
         <span>${processCount} processo(s)</span>
@@ -71,19 +137,23 @@ function renderMachiningForm(state, helpers) {
       <input type="hidden" name="edit_id" value="${helpers.escapeHtml(state.machiningDraft.edit_id)}" />
 
       <div class="form-section">
-        <h4>Dados da peca</h4>
+        <h4>Dados da peça</h4>
         <div class="machining-form-row">
           <label>
-            Codigo *
+            Código *
             <input name="code" type="text" required value="${helpers.escapeHtml(state.machiningDraft.code)}" />
           </label>
           <label>
-            Nome da Peca *
+            Nome da Peça *
             <input name="name" type="text" required value="${helpers.escapeHtml(state.machiningDraft.name)}" />
           </label>
           <label>
-            Nome no Estoque Terminado
-            <input name="finished_name" type="text" value="${helpers.escapeHtml(state.machiningDraft.finished_name || state.machiningDraft.name)}" />
+            Produto acabado no estoque
+            <button class="machining-product-picker-trigger" type="button" data-machining-open-product-picker title="Clique duas vezes para selecionar">
+              <span>${helpers.escapeHtml(finishedProductLabel || "Selecione o produto acabado")}</span>
+            </button>
+            <input name="finished_product_id" type="hidden" value="${helpers.escapeHtml(state.machiningDraft.finished_product_id || "")}" />
+            <input name="finished_name" type="hidden" value="${helpers.escapeHtml(state.machiningDraft.finished_name || state.machiningDraft.name)}" />
           </label>
         </div>
         <div class="machining-form-row">
@@ -94,8 +164,8 @@ function renderMachiningForm(state, helpers) {
         </div>
         <div class="machining-form-row machining-form-row-full">
           <label>
-            Descricao
-            <textarea name="description" placeholder="Detalhes tecnicos da peca">${helpers.escapeHtml(state.machiningDraft.description)}</textarea>
+            Descrição
+            <textarea name="description" placeholder="Detalhes técnicos da peça">${helpers.escapeHtml(state.machiningDraft.description)}</textarea>
           </label>
         </div>
       </div>
@@ -103,8 +173,8 @@ function renderMachiningForm(state, helpers) {
       <div class="form-section">
         <div class="machining-process-header">
           <div>
-            <h4>Processos de Fabricacao</h4>
-            <p class="muted">Cadastre ate 8 etapas na ordem em que a producao deve acontecer.</p>
+            <h4>Processos de Fabricação</h4>
+            <p class="muted">Cadastre ate 8 etapas na ordem em que a produção deve acontecer.</p>
           </div>
           <button
             class="inline-button"
@@ -129,6 +199,115 @@ function renderMachiningForm(state, helpers) {
   `;
 }
 
+function renderMachiningMachinesModal(state, helpers) {
+  if (!state.machiningMachinesModalOpen) return "";
+  const machines = readMachiningMachines();
+
+  return `
+    <div class="modal-overlay machining-modal-overlay" data-machining-machines-backdrop aria-hidden="false">
+      <div class="modal-card machining-settings-modal" role="dialog" aria-modal="true" aria-labelledby="machining-machines-title">
+        <div class="machining-modal-head">
+          <div>
+            <p class="eyebrow muted">Usinagem</p>
+            <h3 id="machining-machines-title">Máquinas da empresa</h3>
+          </div>
+          <button class="icon-inline-button" type="button" data-machining-close-machines aria-label="Fechar">×</button>
+        </div>
+
+        <form class="machining-machine-form" data-machining-machine-form>
+          <label>
+            Nome da máquina *
+            <input name="machine_name" type="text" required placeholder="Ex.: Torno CNC" />
+          </label>
+          <label>
+            Código ou setor
+            <input name="machine_code" type="text" placeholder="Ex.: CNC-01" />
+          </label>
+          <button class="primary-button" type="submit">Cadastrar</button>
+        </form>
+
+        <div class="machining-machine-list">
+          ${
+            machines.length
+              ? machines.map((machine) => `
+                <article class="machining-machine-item">
+                  <div>
+                    <strong>${helpers.escapeHtml(machine.name)}</strong>
+                    <span class="muted">${helpers.escapeHtml(machine.code || "Sem código")}</span>
+                  </div>
+                  <button class="inline-button danger-button" type="button" data-machining-remove-machine="${helpers.escapeHtml(machine.id)}">Remover</button>
+                </article>
+              `).join("")
+              : `<div class="empty-state">Nenhuma máquina cadastrada.</div>`
+          }
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderMachiningProductPickerModal(state, helpers) {
+  if (!state.machiningProductPickerOpen) return "";
+  const query = String(state.machiningProductPickerSearch || "").trim().toLowerCase();
+  const products = (state.moduleData.products || [])
+    .filter((product) => helpers.getProductType(product) === "finished_product")
+    .filter((product) => {
+      if (!query) return true;
+      return [product.name, product.code, product.sku, product.product_type, product.description]
+        .some((value) => String(value || "").toLowerCase().includes(query));
+    });
+
+  return `
+    <div class="modal-overlay machining-modal-overlay" data-machining-product-picker-backdrop aria-hidden="false">
+      <div class="modal-card machining-product-picker-modal" role="dialog" aria-modal="true" aria-labelledby="machining-product-picker-title">
+        <div class="machining-modal-head">
+          <div>
+            <p class="eyebrow muted">Produto acabado</p>
+            <h3 id="machining-product-picker-title">Selecionar produto do estoque</h3>
+          </div>
+          <button class="icon-inline-button" type="button" data-machining-close-product-picker aria-label="Fechar">×</button>
+        </div>
+
+        <label class="search-input-shell machining-product-picker-search">
+          <span class="search-input-icon">⌕</span>
+          <input
+            id="machining-product-picker-search"
+            type="text"
+            placeholder="Buscar produto por nome ou código..."
+            value="${helpers.escapeHtml(state.machiningProductPickerSearch || "")}"
+          />
+        </label>
+
+        <div class="machining-product-picker-list">
+          ${
+            products.length
+              ? products.map((product) => `
+                <button class="machining-product-picker-item" type="button" data-machining-select-finished-product="${helpers.escapeHtml(product.id)}">
+                  <strong>${helpers.escapeHtml(product.name || "-")}</strong>
+                  <span>${helpers.escapeHtml(product.code || "Sem código")} • Estoque ${helpers.formatQuantity(product.current_stock || 0)}</span>
+                </button>
+              `).join("")
+              : `<div class="empty-state">Nenhum produto acabado encontrado.</div>`
+          }
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderMachiningTabs(state) {
+  return `
+    <div class="bom-tabs">
+      <button class="bom-tab-button ${state.machiningTab === "production" ? "active" : ""}" type="button" data-machining-tab="production">
+        Produção Usinagem
+      </button>
+      <button class="bom-tab-button ${state.machiningTab === "products" ? "active" : ""}" type="button" data-machining-tab="products">
+        Produtos
+      </button>
+    </div>
+  `;
+}
+
 function renderMachiningProcessTimelineItem(process, index, helpers) {
   return `
     <article class="machining-stage-item">
@@ -136,7 +315,7 @@ function renderMachiningProcessTimelineItem(process, index, helpers) {
       <div class="machining-stage-copy">
         <strong>${helpers.escapeHtml(process.name)}</strong>
         <span class="muted">
-          ${helpers.escapeHtml(process.machine || "Maquina nao informada")} •
+          ${helpers.escapeHtml(process.machine || "Máquina não informada")} •
           ${helpers.formatMinutesLabel(process.estimated_minutes).replace(" total", "")}
         </span>
       </div>
@@ -151,7 +330,7 @@ function renderMachiningOrderStepItem(pieceId, orderId, step, index, actionState
       <div class="machining-stage-copy">
         <strong>${helpers.escapeHtml(step.name)}</strong>
         <span class="muted">
-          ${helpers.escapeHtml(step.machine || "Maquina nao informada")} •
+          ${helpers.escapeHtml(step.machine || "Máquina não informada")} •
           ${helpers.formatMinutesLabel(step.estimated_minutes).replace(" total", "")}
           ${step.completed_at ? ` • Finalizada em ${helpers.formatDateTime(step.completed_at)}` : ""}
         </span>
@@ -185,8 +364,8 @@ function renderMachiningStartProductionForm(piece, state, helpers) {
   return `
     <div class="machining-inline-head">
       <div>
-        <h4>Iniciar producao por etapas</h4>
-        <p class="muted">Toda nova producao exige quantidade e lote obrigatorios.</p>
+        <h4>Iniciar produção por etapas</h4>
+        <p class="muted">Toda nova produção exige quantidade e lote obrigatórios.</p>
       </div>
     </div>
 
@@ -202,15 +381,15 @@ function renderMachiningStartProductionForm(piece, state, helpers) {
       </label>
       <label>
         Operador
-        <input name="operator" type="text" value="${helpers.escapeHtml(draft.operator)}" />
+        <input type="text" readonly value="${helpers.escapeHtml(helpers.getLoggedUserName("Automático ao iniciar"))}" />
       </label>
       <label>
-        Nome no estoque terminado
-        <input name="finished_name" type="text" value="${helpers.escapeHtml(draft.finished_name || piece.finished_name || piece.name)}" />
+        Produto acabado no estoque
+        <input name="finished_name" type="text" readonly value="${helpers.escapeHtml(draft.finished_name || piece.finished_name || piece.name)}" />
       </label>
       <div class="form-actions-row machining-form-actions">
         <button class="ghost-button" type="button" data-machining-close-inline>Cancelar</button>
-        <button class="primary-button" type="submit">Iniciar Producao</button>
+        <button class="primary-button" type="submit">Iniciar Produção</button>
       </div>
     </form>
   `;
@@ -224,8 +403,8 @@ function renderMachiningPieceDetails(piece, state, helpers) {
   return `
     <div class="machining-inline-head">
       <div>
-        <h4>Detalhes da peca</h4>
-        <p class="muted">${helpers.escapeHtml(piece.description || "Sem descricao cadastrada.")}</p>
+        <h4>Detalhes da peça</h4>
+        <p class="muted">${helpers.escapeHtml(piece.description || "Sem descrição cadastrada.")}</p>
       </div>
     </div>
 
@@ -238,7 +417,7 @@ function renderMachiningPieceDetails(piece, state, helpers) {
       </section>
 
       <section class="form-section">
-        <h4>Producao atual</h4>
+        <h4>Produção atual</h4>
         ${
           latestOrder
             ? `
@@ -268,13 +447,13 @@ function renderMachiningPieceDetails(piece, state, helpers) {
                 ${visibleSteps.map(({ step, index }) => renderMachiningOrderStepItem(piece.id, latestOrder.id, step, index, helpers.canStepAction(latestOrder, step), helpers)).join("")}
               </div>
             `
-            : `<div class="empty-state">Nenhuma producao iniciada para esta peca.</div>`
+            : `<div class="empty-state">Nenhuma produção iniciada para esta peça.</div>`
         }
       </section>
     </div>
 
     <section class="form-section">
-      <h4>Historico de estoque</h4>
+      <h4>Histórico de estoque</h4>
       ${
         stockEntries.length
           ? `
@@ -287,7 +466,7 @@ function renderMachiningPieceDetails(piece, state, helpers) {
               `).join("")}
             </div>
           `
-          : `<div class="empty-state">A peca entra no estoque somente apos concluir todas as etapas.</div>`
+          : `<div class="empty-state">A peça entra no estoque somente após concluir todas as etapas.</div>`
       }
     </section>
   `;
@@ -312,14 +491,14 @@ function renderMachiningPieceCard(piece, canEdit, state, helpers) {
           </div>
 
           <div class="machining-piece-meta">
-            <span>${helpers.escapeHtml(piece.material || "Material nao informado")}</span>
+            <span>${helpers.escapeHtml(piece.material || "Material não informado")}</span>
             <span>${processCount} processo(s)</span>
             <span>${helpers.formatMinutesLabel(piece.total_minutes)}</span>
           </div>
 
           <div class="machining-piece-kpis">
             <div>
-              <span>Codigo</span>
+              <span>Código</span>
               <strong>${helpers.escapeHtml(piece.code)}</strong>
             </div>
             <div>
@@ -327,8 +506,8 @@ function renderMachiningPieceCard(piece, canEdit, state, helpers) {
               <strong>${helpers.escapeHtml(piece.material || "-")}</strong>
             </div>
             <div>
-              <span>Ultima producao</span>
-              <strong>${latestOrder ? helpers.escapeHtml(latestOrder.lot) : "Nao iniciada"}</strong>
+              <span>Última produção</span>
+              <strong>${latestOrder ? helpers.escapeHtml(latestOrder.lot) : "Não iniciada"}</strong>
             </div>
             <div>
               <span>Etapa atual</span>
@@ -338,8 +517,9 @@ function renderMachiningPieceCard(piece, canEdit, state, helpers) {
         </div>
 
         <div class="machining-piece-actions">
-          ${canEdit ? `<button class="primary-button" type="button" data-machining-start-production="${piece.id}">Enviar para Producao</button>` : ""}
+          ${canEdit ? `<button class="primary-button" type="button" data-machining-start-production="${piece.id}">Enviar para Produção da Usinagem</button>` : ""}
           ${canEdit ? `<button class="inline-button" type="button" data-machining-edit-id="${piece.id}">Editar</button>` : ""}
+          ${canEdit ? `<button class="inline-button" type="button" data-machining-duplicate-id="${piece.id}">Duplicar</button>` : ""}
           ${canEdit ? `<button class="inline-button danger-button" type="button" data-machining-delete-id="${piece.id}">Excluir</button>` : ""}
           <button class="ghost-button" type="button" data-machining-toggle-details="${piece.id}">
             ${isDetailOpen ? "Recolher detalhes" : "Expandir detalhes"}
@@ -362,6 +542,35 @@ function renderMachiningPieceCard(piece, canEdit, state, helpers) {
   `;
 }
 
+function renderMachiningProductionCard(piece, state, helpers) {
+  const latestOrder = helpers.getLatestMachiningOrder(piece);
+  if (!latestOrder) return "";
+
+  return `
+    <article class="table-card machining-piece-card">
+      <div class="machining-piece-top">
+        <div class="machining-piece-main">
+          <div class="machining-piece-title-row">
+            <div>
+              <span class="machining-piece-code">${helpers.escapeHtml(piece.code)}</span>
+              <h4>${helpers.escapeHtml(piece.name)}</h4>
+            </div>
+            ${helpers.renderMachiningStatusBadge(piece.status)}
+          </div>
+          <div class="machining-piece-meta">
+            <span>Lote ${helpers.escapeHtml(latestOrder.lot || "-")}</span>
+            <span>${helpers.formatQuantity(latestOrder.quantity_planned || 0)} un</span>
+            <span>${helpers.escapeHtml(helpers.getMachiningCurrentStageLabel(latestOrder))}</span>
+          </div>
+        </div>
+      </div>
+      <div class="machining-accordion-card machining-inline-card">
+        ${renderMachiningPieceDetails(piece, state, helpers)}
+      </div>
+    </article>
+  `;
+}
+
 export default {
   render() {
     const bridge = getBridge();
@@ -369,21 +578,24 @@ export default {
     const helpers = bridge.helpers;
 
     if (!bridge.hasPermission("machining", "view")) {
-      return helpers.noPermissionTemplate("Seu perfil nao possui acesso ao modulo de usinagem.");
+      return helpers.noPermissionTemplate("Seu perfil não possui acesso ao módulo de usinagem.");
     }
 
     const canEdit = bridge.hasPermission("machining", "edit");
     const pieces = state.moduleData.machiningPieces || [];
+    const activeTab = state.machiningTab || "production";
     const isFormOpen = state.openAccordionKey === "machining-form";
     const searchTerm = state.machiningSearch.trim().toLowerCase();
-    const filteredPieces = pieces.filter((piece) => {
+    const productionPieces = pieces.filter((piece) => (piece.productions || []).some((order) => order.status !== "Concluída"));
+    const sourcePieces = activeTab === "production" ? productionPieces : pieces;
+    const filteredPieces = sourcePieces.filter((piece) => {
       const matchesSearch = !searchTerm
         || [piece.code, piece.name, piece.material].some((value) => String(value || "").toLowerCase().includes(searchTerm));
-      const matchesStatus = state.machiningStatusFilter === "all" || piece.status === state.machiningStatusFilter;
+      const matchesStatus = activeTab === "production" || state.machiningStatusFilter === "all" || piece.status === state.machiningStatusFilter;
       return matchesSearch && matchesStatus;
     });
     const inRegistration = pieces.filter((piece) => piece.status === "Cadastro").length;
-    const inProduction = pieces.filter((piece) => piece.status === "Em Producao").length;
+    const inProduction = pieces.filter((piece) => piece.status === "Em Produção").length;
     const finished = pieces.filter((piece) => piece.status === "Finalizada").length;
 
     return `
@@ -391,17 +603,26 @@ export default {
         <div class="module-head machining-head">
           <div>
             <p class="eyebrow muted">Usinagem</p>
-            <h3>Pecas &amp; Processos de Usinagem</h3>
-            <p class="muted">${pieces.length} peca(s) cadastrada(s)</p>
+            <h3>Peças &amp; Processos de Usinagem</h3>
+            <p class="muted">${pieces.length} peça(s) cadastrada(s)</p>
           </div>
           <div class="module-head-actions">
-            ${canEdit ? `
+            ${canEdit && activeTab === "products" ? `
+              <button
+                class="inline-button machining-settings-button"
+                type="button"
+                data-machining-open-machines
+                aria-label="Cadastrar máquinas"
+                title="Cadastrar máquinas"
+              >
+                ⚙
+              </button>
               <button
                 class="primary-button machining-create-button ${isFormOpen ? "is-open" : ""}"
                 type="button"
                 data-machining-toggle-form
               >
-                <span>+ Nova Peca</span>
+                <span>+ Nova Peça</span>
                 <span class="production-toggle-icon">${isFormOpen ? "▴" : "▾"}</span>
               </button>
             ` : ""}
@@ -410,21 +631,21 @@ export default {
 
         <div class="summary-grid">
           ${helpers.renderKpiCard({
-            label: "Pecas Cadastradas",
+            label: "Peças Cadastradas",
             value: pieces.length,
-            note: pieces.length ? "Cadastro tecnico pronto para producao" : "Nenhuma peca cadastrada",
+            note: pieces.length ? "Cadastro técnico pronto para produção" : "Nenhuma peça cadastrada",
             icon: "◈",
             tone: "blue",
           })}
           ${helpers.renderKpiCard({
             label: "Em Cadastro",
             value: inRegistration,
-            note: inRegistration ? "Pecas aguardando envio para producao" : "Sem cadastro pendente",
+            note: inRegistration ? "Peças aguardando envio para produção" : "Sem cadastro pendente",
             icon: "⊞",
             tone: "amber",
           })}
           ${helpers.renderKpiCard({
-            label: "Em Producao",
+            label: "Em Produção",
             value: inProduction,
             note: inProduction ? "Ordens em execucao por etapas" : "Nenhuma ordem ativa",
             icon: "◭",
@@ -433,22 +654,26 @@ export default {
           ${helpers.renderKpiCard({
             label: "Finalizadas",
             value: finished,
-            note: finished ? "Pecas ja integradas ao estoque" : "Sem pecas concluidas",
+            note: finished ? "Peças já integradas ao estoque" : "Sem peças concluídas",
             icon: "◬",
             tone: "red",
           })}
         </div>
 
+        ${renderMachiningTabs(state)}
+
         ${
-          canEdit
-            ? `
-              <div class="machining-accordion-shell ${isFormOpen ? "open" : ""}">
-                <div class="machining-accordion-card">
-                  ${renderMachiningForm(state, helpers)}
+          activeTab === "products"
+            ? canEdit
+              ? `
+                <div class="machining-accordion-shell ${isFormOpen ? "open" : ""}">
+                  <div class="machining-accordion-card">
+                    ${renderMachiningForm(state, helpers)}
+                  </div>
                 </div>
-              </div>
-            `
-            : `<div class="empty-state">Seu perfil pode visualizar este modulo, mas nao pode editar.</div>`
+              `
+              : `<div class="empty-state">Seu perfil pode visualizar este módulo, mas não pode editar.</div>`
+            : ""
         }
 
         <div class="table-actions machining-filters-row">
@@ -457,39 +682,51 @@ export default {
             <input
               id="machining-search-input"
               type="text"
-              placeholder="Buscar por codigo, nome ou material..."
+              placeholder="Buscar por código, nome ou material..."
               value="${helpers.escapeHtml(state.machiningSearch)}"
             />
           </label>
 
-          <label>
-            Filtro
-            <select id="machining-status-filter">
-              ${helpers.renderOptions([
-                { value: "all", label: "Todas" },
-                { value: "Cadastro", label: "Cadastro" },
-                { value: "Em Producao", label: "Em Producao" },
-                { value: "Finalizada", label: "Finalizada" },
-              ], state.machiningStatusFilter)}
-            </select>
-          </label>
+          ${
+            activeTab === "products"
+              ? `
+                <label>
+                  Filtro
+                  <select id="machining-status-filter">
+                    ${helpers.renderOptions([
+                      { value: "all", label: "Todas" },
+                      { value: "Cadastro", label: "Cadastro" },
+                      { value: "Em Produção", label: "Em Produção" },
+                      { value: "Finalizada", label: "Finalizada" },
+                    ], state.machiningStatusFilter)}
+                  </select>
+                </label>
+              `
+              : ""
+          }
         </div>
 
         <div class="machining-list">
           ${
             filteredPieces.length
-              ? filteredPieces.map((piece) => renderMachiningPieceCard(piece, canEdit, state, helpers)).join("")
+              ? filteredPieces
+                  .map((piece) => activeTab === "production"
+                    ? renderMachiningProductionCard(piece, state, helpers)
+                    : renderMachiningPieceCard(piece, canEdit, state, helpers))
+                  .join("")
               : `
                 <div class="table-card machining-empty-card">
                   <div class="production-empty-state">
                     <div class="production-empty-icon">◈</div>
-                    <strong>Nenhuma peca encontrada</strong>
+                    <strong>${activeTab === "production" ? "Nenhum produto em produção na usinagem" : "Nenhuma peça encontrada"}</strong>
                   </div>
                 </div>
               `
           }
         </div>
       </section>
+      ${renderMachiningMachinesModal(state, helpers)}
+      ${renderMachiningProductPickerModal(state, helpers)}
     `;
   },
 
@@ -497,6 +734,15 @@ export default {
     const bridge = getBridge();
     const state = bridge.getState();
     const helpers = bridge.helpers;
+
+    document.querySelectorAll("[data-machining-tab]").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.machiningTab = button.dataset.machiningTab;
+        state.openAccordionKey = null;
+        state.machiningDraft = helpers.createEmptyMachiningDraft();
+        helpers.renderActiveModule();
+      });
+    });
 
     document.querySelector("[data-machining-toggle-form]")?.addEventListener("click", async () => {
       const shouldOpen = state.openAccordionKey !== "machining-form";
@@ -506,6 +752,81 @@ export default {
       if (shouldOpen) {
         document.querySelector("#machining-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
       }
+    });
+
+    document.querySelector("[data-machining-open-machines]")?.addEventListener("click", () => {
+      state.machiningMachinesModalOpen = true;
+      helpers.renderActiveModule();
+    });
+
+    document.querySelectorAll("[data-machining-close-machines], [data-machining-machines-backdrop]").forEach((element) => {
+      element.addEventListener("click", (event) => {
+        if (event.target !== element && !element.matches("[data-machining-close-machines]")) return;
+        state.machiningMachinesModalOpen = false;
+        helpers.renderActiveModule();
+      });
+    });
+
+    document.querySelector("[data-machining-machine-form]")?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const name = form.elements.namedItem("machine_name")?.value.trim() || "";
+      const code = form.elements.namedItem("machine_code")?.value.trim() || "";
+      if (!name) {
+        helpers.showToast("Informe o nome da máquina.", "warning");
+        return;
+      }
+      const machines = readMachiningMachines();
+      if (machines.some((machine) => machine.name.toLowerCase() === name.toLowerCase())) {
+        helpers.showToast("Esta máquina já está cadastrada.", "warning");
+        return;
+      }
+      persistMachiningMachines([{ id: `mach-machine-${Date.now()}`, name, code }, ...machines]);
+      helpers.showToast("Máquina cadastrada com sucesso.", "success");
+      helpers.renderActiveModule();
+    });
+
+    document.querySelectorAll("[data-machining-remove-machine]").forEach((button) => {
+      button.addEventListener("click", () => {
+        persistMachiningMachines(readMachiningMachines().filter((machine) => machine.id !== button.dataset.machiningRemoveMachine));
+        helpers.renderActiveModule();
+      });
+    });
+
+    document.querySelector("[data-machining-open-product-picker]")?.addEventListener("dblclick", () => {
+      helpers.syncMachiningDraftFromForm(document.querySelector("#machining-form"));
+      state.machiningProductPickerOpen = true;
+      state.machiningProductPickerSearch = "";
+      helpers.renderActiveModule();
+      setTimeout(() => document.querySelector("#machining-product-picker-search")?.focus(), 0);
+    });
+
+    document.querySelector("[data-machining-close-product-picker]")?.addEventListener("click", () => {
+      state.machiningProductPickerOpen = false;
+      helpers.renderActiveModule();
+    });
+
+    document.querySelector("[data-machining-product-picker-backdrop]")?.addEventListener("click", (event) => {
+      if (event.target === event.currentTarget) {
+        state.machiningProductPickerOpen = false;
+        helpers.renderActiveModule();
+      }
+    });
+
+    helpers.bindDeferredTextFilter("#machining-product-picker-search", (value) => {
+      state.machiningProductPickerSearch = value;
+    });
+
+    document.querySelectorAll("[data-machining-select-finished-product]").forEach((button) => {
+      button.addEventListener("dblclick", () => {
+        const product = (state.moduleData.products || []).find((item) => item.id === button.dataset.machiningSelectFinishedProduct);
+        if (!product) return;
+        state.machiningDraft.finished_product_id = product.id;
+        state.machiningDraft.finished_name = product.name || "";
+        state.machiningProductPickerOpen = false;
+        state.machiningProductPickerSearch = "";
+        helpers.renderActiveModule();
+      });
     });
 
     helpers.bindDeferredTextFilter("#machining-search-input", (value) => {
@@ -526,7 +847,7 @@ export default {
     document.querySelector("[data-machining-add-process]")?.addEventListener("click", () => {
       helpers.syncMachiningDraftFromForm(document.querySelector("#machining-form"));
       if (state.machiningDraft.processes.length >= 8) {
-        helpers.showToast("A peca pode ter no maximo 8 processos.", "warning");
+        helpers.showToast("A peça pode ter no máximo 8 processos.", "warning");
         return;
       }
       state.machiningDraft.processes.push({
@@ -584,12 +905,35 @@ export default {
       });
     });
 
+    document.querySelectorAll("[data-machining-duplicate-id]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const piece = helpers.findMachiningPiece(button.dataset.machiningDuplicateId);
+        if (!piece) return;
+        const existingCodes = new Set((state.moduleData.machiningPieces || []).map((item) => String(item.code || "").toLowerCase()));
+        let nextCode = `${piece.code || "PECA"}-COPIA`;
+        let counter = 2;
+        while (existingCodes.has(nextCode.toLowerCase())) {
+          nextCode = `${piece.code || "PECA"}-COPIA-${counter}`;
+          counter += 1;
+        }
+        state.machiningDraft = {
+          ...helpers.hydrateMachiningDraft(piece),
+          edit_id: "",
+          code: nextCode,
+          name: `${piece.name || "Peça"} (Cópia)`,
+        };
+        state.openAccordionKey = "machining-form";
+        helpers.renderActiveModule();
+        document.querySelector("#machining-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    });
+
     document.querySelectorAll("[data-machining-delete-id]").forEach((button) => {
       button.addEventListener("click", () => {
         const pieces = (state.moduleData.machiningPieces || []).filter((piece) => piece.id !== button.dataset.machiningDeleteId);
         helpers.persistMachiningPieces(pieces);
         helpers.renderActiveModule();
-        helpers.showToast("Peca excluida com sucesso.", "success");
+        helpers.showToast("Peça excluída com sucesso.", "success");
       });
     });
 

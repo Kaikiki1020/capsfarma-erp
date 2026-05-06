@@ -1,9 +1,22 @@
 function getBridge() {
   const bridge = window.CAPSFARMA_MODULE_BRIDGE;
   if (!bridge) {
-    throw new Error("Bridge modular do ERP indisponivel.");
+    throw new Error("Bridge modular do ERP indisponível.");
   }
   return bridge;
+}
+
+function downloadCsv(filename, rows) {
+  const csv = rows
+    .map((row) => row.map((value) => `"${String(value ?? "").replaceAll("\"", "\"\"")}"`).join(";"))
+    .join("\n");
+  const blob = new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 export default {
@@ -13,7 +26,7 @@ export default {
     const helpers = bridge.helpers;
 
     if (!bridge.hasPermission("reports", "view")) {
-      return helpers.noPermissionTemplate("Seu perfil nao possui acesso ao modulo de relatorios.");
+      return helpers.noPermissionTemplate("Seu perfil não possui acesso ao módulo de relatórios.");
     }
 
     const snapshot = helpers.buildReportsSnapshot();
@@ -23,18 +36,19 @@ export default {
         <div class="module-head">
           <div>
             <p class="eyebrow muted">Analise gerencial</p>
-            <h3>Relatorios</h3>
-            <p class="muted">Consolidado operacional de vendas, producao, compras, estoque e ordens de servico.</p>
+            <h3>Relatórios</h3>
+            <p class="muted">Consolidado operacional de vendas, produção, compras, contas a pagar, estoque e ordens de serviço.</p>
           </div>
           <div class="module-head-actions">
             <button class="ghost-button" type="button" data-reports-refresh>Atualizar</button>
+            <button class="ghost-button" type="button" data-reports-export-excel>Exportar Excel</button>
             <button class="primary-button" type="button" data-reports-export>Exportar PDF</button>
           </div>
         </div>
 
         <form id="reports-filter-form" class="table-actions reports-filter-grid">
           <label>De<input type="date" name="from" value="${helpers.escapeHtml(state.reportsFilters.from)}" /></label>
-          <label>Ate<input type="date" name="to" value="${helpers.escapeHtml(state.reportsFilters.to)}" /></label>
+          <label>Até<input type="date" name="to" value="${helpers.escapeHtml(state.reportsFilters.to)}" /></label>
           <div class="form-actions-row">
             <button class="primary-button" type="submit">Aplicar periodo</button>
           </div>
@@ -42,9 +56,10 @@ export default {
 
         <div class="summary-grid">
           ${helpers.renderKpiCard({ label: "Vendas Finalizadas", value: helpers.formatCurrency(snapshot.totalSales), note: `${snapshot.finalizedSalesCount} venda(s) no periodo`, icon: "◨", tone: "green" })}
-          ${helpers.renderKpiCard({ label: "Compras", value: helpers.formatCurrency(snapshot.totalPurchases), note: `${snapshot.openPurchasesCount} solicitacao(oes) em aberto`, icon: "◧", tone: "amber" })}
-          ${helpers.renderKpiCard({ label: "Producao Concluida", value: snapshot.completedProductionCount, note: `${snapshot.inProgressProductionCount} ordem(ns) em andamento`, icon: "◭", tone: "blue" })}
-          ${helpers.renderKpiCard({ label: "Estoque Critico", value: snapshot.criticalStockCount, note: `${snapshot.openServiceOrdersCount} OS abertas`, icon: "◬", tone: "red" })}
+          ${helpers.renderKpiCard({ label: "Compras", value: helpers.formatCurrency(snapshot.totalPurchases), note: `${snapshot.openPurchasesCount} solicitação(oes) em aberto`, icon: "◧", tone: "amber" })}
+          ${helpers.renderKpiCard({ label: "Contas a Pagar", value: helpers.formatCurrency(snapshot.totalPayables), note: `${snapshot.pendingPayablesCount} conta(s) pendentes/atrasadas`, icon: "◫", tone: snapshot.pendingPayablesCount ? "red" : "green" })}
+          ${helpers.renderKpiCard({ label: "Produção Concluída", value: snapshot.completedProductionCount, note: `${snapshot.inProgressProductionCount} ordem(ns) em andamento`, icon: "◭", tone: "blue" })}
+          ${helpers.renderKpiCard({ label: "Pago vs Pendente", value: helpers.formatCurrency(snapshot.paidPayablesTotal), note: `${helpers.formatCurrency(snapshot.totalPayables - snapshot.paidPayablesTotal)} ainda em aberto`, icon: "R$", tone: "blue" })}
         </div>
 
         <div class="reports-grid">
@@ -52,11 +67,11 @@ export default {
             <div class="dashboard-block-header">
               <div>
                 <h4>Vendas recentes</h4>
-                <p class="muted">Ultimas vendas finalizadas dentro do periodo.</p>
+                <p class="muted">Últimas vendas finalizadas dentro do período.</p>
               </div>
             </div>
             ${helpers.renderTable(
-              ["Numero", "Cliente", "Total", "Status"],
+              ["Número", "Cliente", "Total", "Status"],
               snapshot.recentSales.map(({ sale, metadata }) => [
                 sale.sale_number || sale.id || "-",
                 sale.customer_name || "-",
@@ -69,8 +84,8 @@ export default {
           <section class="table-card">
             <div class="dashboard-block-header">
               <div>
-                <h4>Producao</h4>
-                <p class="muted">Ordens planejadas, em andamento e concluidas.</p>
+                <h4>Produção</h4>
+                <p class="muted">Ordens planejadas, em andamento e concluídas.</p>
               </div>
             </div>
             ${helpers.renderTable(
@@ -88,11 +103,11 @@ export default {
             <div class="dashboard-block-header">
               <div>
                 <h4>Estoque critico</h4>
-                <p class="muted">Itens abaixo do minimo para acompanhamento imediato.</p>
+                <p class="muted">Itens abaixo do mínimo para acompanhamento imediato.</p>
               </div>
             </div>
             ${helpers.renderTable(
-              ["Produto", "Atual", "Minimo", "Unidade"],
+              ["Produto", "Atual", "Mínimo", "Unidade"],
               snapshot.criticalStock.slice(0, 10).map((item) => [
                 item.name,
                 helpers.formatQuantity(item.current_stock),
@@ -105,7 +120,7 @@ export default {
           <section class="table-card">
             <div class="dashboard-block-header">
               <div>
-                <h4>Ordens de servico abertas</h4>
+                <h4>Ordens de serviço abertas</h4>
                 <p class="muted">Pendencias operacionais no periodo selecionado.</p>
               </div>
             </div>
@@ -117,6 +132,64 @@ export default {
                 order.responsible_name || "-",
                 helpers.statusCell(order.status || "open"),
               ])
+            )}
+          </section>
+
+          <section class="table-card">
+            <div class="dashboard-block-header">
+              <div>
+                <h4>Contas por fornecedor</h4>
+                <p class="muted">Top fornecedores por valor acumulado no periodo.</p>
+              </div>
+            </div>
+            ${helpers.renderTable(
+              ["Fornecedor", "Total"],
+              Array.from(snapshot.payables.reduce((map, { metadata }) => {
+                map.set(metadata.supplier || "-", (map.get(metadata.supplier || "-") || 0) + Number(metadata.amount || 0));
+                return map;
+              }, new Map()).entries())
+                .sort((left, right) => right[1] - left[1])
+                .slice(0, 10)
+                .map(([supplier, total]) => [supplier, helpers.formatCurrency(total)])
+            )}
+          </section>
+
+          <section class="table-card">
+            <div class="dashboard-block-header">
+              <div>
+                <h4>Contas por categoria</h4>
+                <p class="muted">Distribuicao do contas a pagar por categoria financeira.</p>
+              </div>
+            </div>
+            ${helpers.renderTable(
+              ["Categoria", "Total"],
+              Array.from(snapshot.payables.reduce((map, { metadata }) => {
+                map.set(metadata.category || "-", (map.get(metadata.category || "-") || 0) + Number(metadata.amount || 0));
+                return map;
+              }, new Map()).entries())
+                .sort((left, right) => right[1] - left[1])
+                .map(([category, total]) => [category, helpers.formatCurrency(total)])
+            )}
+          </section>
+
+          <section class="table-card">
+            <div class="dashboard-block-header">
+              <div>
+                <h4>Contas atrasadas</h4>
+                <p class="muted">Títulos que exigem atuação imediata.</p>
+              </div>
+            </div>
+            ${helpers.renderTable(
+              ["Conta", "Fornecedor", "Valor", "Vencimento"],
+              snapshot.payables
+                .filter(({ metadata }) => metadata.status === "overdue")
+                .slice(0, 10)
+                .map(({ payable, metadata }) => [
+                  metadata.payable_number || payable.id || "-",
+                  metadata.supplier || "-",
+                  helpers.formatCurrency(metadata.amount || 0),
+                  helpers.formatDate(metadata.due_date || ""),
+                ])
             )}
           </section>
         </div>
@@ -142,12 +215,29 @@ export default {
     document.querySelector("[data-reports-refresh]")?.addEventListener("click", async () => {
       await helpers.loadAllVisibleData();
       helpers.renderActiveModule();
-      helpers.showToast("Relatorios atualizados.", "success");
+      helpers.showToast("Relatórios atualizados.", "success");
     });
 
     document.querySelector("[data-reports-export]")?.addEventListener("click", () => {
       const snapshot = helpers.buildReportsSnapshot();
-      helpers.openPrintWindowForHtml(helpers.buildReportsExportHtml(snapshot), "Relatorios Gerenciais");
+      helpers.openPrintWindowForHtml(helpers.buildReportsExportHtml(snapshot), "Relatórios Gerenciais");
+    });
+
+    document.querySelector("[data-reports-export-excel]")?.addEventListener("click", () => {
+      const snapshot = helpers.buildReportsSnapshot();
+      downloadCsv("relatorio-contas-a-pagar.csv", [
+        ["Número", "Descrição", "Fornecedor", "Categoria", "Valor", "Vencimento", "Status", "Tipo"],
+        ...snapshot.payables.map(({ payable, metadata }) => [
+          metadata.payable_number || payable.id || "-",
+          metadata.description || "-",
+          metadata.supplier || "-",
+          metadata.category || "-",
+          Number(metadata.amount || 0).toFixed(2),
+          metadata.due_date || "",
+          metadata.status || "",
+          metadata.account_type || "",
+        ]),
+      ]);
     });
   },
 };

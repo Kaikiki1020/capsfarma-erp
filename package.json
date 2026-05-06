@@ -11,9 +11,14 @@
     "supabase:db:push": "supabase db push",
     "vps:agent": "node backend/scripts/vps-agent.js",
     "ops:backup": "bash backend/scripts/backup-supabase.sh",
+    "ops:release-check": "bash backend/scripts/release-check.sh",
     "ops:restore": "bash backend/scripts/restore-supabase.sh",
+    "ops:verify-restore": "bash backend/scripts/verify-restore.sh",
     "ops:smoke": "bash backend/scripts/smoke-test.sh",
     "test": "echo \"Error: no test specified\" && exit 1"
+    ,
+    "test:smoke": "bash backend/scripts/smoke-test.sh",
+    "test:syntax": "bash backend/scripts/check-syntax.sh"
   },
   "keywords": [],
   "author": "",

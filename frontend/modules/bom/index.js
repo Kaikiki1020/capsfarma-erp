@@ -1,18 +1,248 @@
 function getBridge() {
   const bridge = window.CAPSFARMA_MODULE_BRIDGE;
   if (!bridge) {
-    throw new Error("Bridge modular do ERP indisponivel.");
+    throw new Error("Bridge modular do ERP indisponível.");
   }
   return bridge;
 }
 
+function buildDuplicateTextValue(value, existingValues, joiner = "-COPIA") {
+  const baseValue = String(value || "").trim() || "ITEM";
+  const normalizedExisting = new Set((existingValues || []).map((item) => String(item || "").trim().toLowerCase()));
+  let candidate = `${baseValue}${joiner}`;
+  let counter = 2;
+  while (normalizedExisting.has(candidate.trim().toLowerCase())) {
+    candidate = `${baseValue}${joiner}-${counter}`;
+    counter += 1;
+  }
+  return candidate;
+}
+
+function buildDuplicateBomMaterialDraft(material, materials) {
+  const allMaterials = Array.isArray(materials) ? materials : [];
+  return {
+    ...material,
+    code: buildDuplicateTextValue(material.code, allMaterials.map((item) => item.code), "-COPIA"),
+    name: buildDuplicateTextValue(material.name, allMaterials.map((item) => item.name), " (Cópia)"),
+    current_stock: 0,
+  };
+}
+
+function renderBomMaterialActionCell(item, canEdit) {
+  if (!canEdit) {
+    return `<span class="muted">Somente leitura</span>`;
+  }
+
+  return `
+    <div class="action-button-group">
+      <button class="inline-button" type="button" data-bom-material-edit-id="${item.id}">Editar</button>
+      <button class="inline-button" type="button" data-bom-material-duplicate-id="${item.id}">Duplicar</button>
+      <button class="inline-button danger-button" type="button" data-delete-table="bom_materials" data-delete-id="${item.id}">Excluir</button>
+    </div>
+  `;
+}
+
+function getBomFinalProductOptions(state) {
+  const activeProducts = (state.moduleData.products || []).filter((product) => product.status !== "inactive");
+  const products = activeProducts.filter((product) => getBridge().helpers.getProductType(product) === "finished_product");
+
+  return products.map((product) => ({
+    value: product.id,
+    code: product.code || "",
+    name: product.name || "",
+    category: product.category || "",
+    label: `${product.name || "Produto"} (${product.code || "sem código"})`,
+  }));
+}
+
+function renderBomProductPickerField({ name, label, value, displayValue, required = false, target }) {
+  return `
+    <label>
+      ${label}${required ? " *" : ""}
+      <input data-bom-structure-field="${name}" name="${name}" type="hidden" value="${value || ""}" ${required ? "required" : ""} />
+      <span class="input-action-shell">
+        <input type="text" readonly value="${displayValue || ""}" placeholder="Clique para buscar" data-bom-open-product-picker="${target}" />
+      </span>
+    </label>
+  `;
+}
+
+function openBomFinalProductPicker({ state, helpers, onSelect }) {
+  const existing = document.querySelector("[data-bom-product-picker-overlay]");
+  if (existing) existing.remove();
+
+  const products = getBomFinalProductOptions(state);
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay sales-document-modal-overlay";
+  overlay.setAttribute("data-bom-product-picker-overlay", "true");
+  overlay.innerHTML = `
+    <div class="modal-card sales-document-modal" role="dialog" aria-modal="true" aria-label="Selecionar produto final">
+      <div class="sales-config-header">
+        <div>
+          <p class="eyebrow muted">Conjunto BOM</p>
+          <h3>Selecionar Produto Final</h3>
+          <p class="muted">Pesquise pelo nome ou código do produto final.</p>
+        </div>
+        <div class="sales-config-header-actions">
+          <button class="ghost-button" type="button" data-bom-product-picker-close>Fechar</button>
+        </div>
+      </div>
+      <div class="table-actions">
+        <label class="search-input-shell">
+          <span class="search-input-icon">⌕</span>
+          <input type="text" placeholder="Buscar produto final..." data-bom-product-picker-search />
+        </label>
+      </div>
+      <div class="table-card" style="max-height: 55vh; overflow: auto;">
+        <div data-bom-product-picker-results></div>
+      </div>
+    </div>
+  `;
+
+  const close = () => overlay.remove();
+  const results = overlay.querySelector("[data-bom-product-picker-results]");
+  const searchInput = overlay.querySelector("[data-bom-product-picker-search]");
+
+  const renderResults = (term = "") => {
+    const normalized = String(term || "").trim().toLowerCase();
+    const filtered = !normalized
+      ? products
+      : products.filter((product) =>
+        product.name.toLowerCase().includes(normalized)
+        || product.code.toLowerCase().includes(normalized)
+      );
+
+    results.innerHTML = filtered.length
+      ? filtered.map((product) => `
+          <button class="bom-file-card" type="button" data-bom-product-picker-select="${helpers.escapeHtml(product.value)}" style="width:100%; text-align:left; cursor:pointer;">
+            <div>
+              <strong>${helpers.escapeHtml(product.label)}</strong>
+              <div class="table-inline-copy muted">Produto final</div>
+            </div>
+          </button>
+        `).join("")
+      : `<div class="empty-state">Nenhum produto final encontrado.</div>`;
+
+    results.querySelectorAll("[data-bom-product-picker-select]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const selected = products.find((product) => product.value === button.dataset.bomProductPickerSelect);
+        if (!selected) return;
+        onSelect(selected);
+        close();
+      });
+    });
+  };
+
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay || event.target.hasAttribute("data-bom-product-picker-close")) {
+      close();
+    }
+  });
+
+  searchInput?.addEventListener("input", () => renderResults(searchInput.value));
+  document.body.appendChild(overlay);
+  renderResults("");
+  searchInput?.focus();
+}
+
+function openBomComponentPicker({ state, helpers, index, onSelect }) {
+  const existing = document.querySelector("[data-bom-component-picker-overlay]");
+  if (existing) existing.remove();
+
+  const components = helpers.buildBomComponentOptions().map((option) => {
+    const [type] = String(option.value || "").split(":");
+    return {
+      value: option.value,
+      label: option.label,
+      type,
+      typeLabel: type === "product" ? "Produto" : type === "material" ? "Material" : "Conjunto",
+    };
+  });
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay sales-document-modal-overlay";
+  overlay.setAttribute("data-bom-component-picker-overlay", "true");
+  overlay.innerHTML = `
+    <div class="modal-card sales-document-modal" role="dialog" aria-modal="true" aria-label="Selecionar item do conjunto">
+      <div class="sales-config-header">
+        <div>
+          <p class="eyebrow muted">Itens do Conjunto</p>
+          <h3>Selecionar Item</h3>
+          <p class="muted">Pesquise produtos, peças, materiais ou subconjuntos.</p>
+        </div>
+        <div class="sales-config-header-actions">
+          <button class="ghost-button" type="button" data-bom-component-picker-close>Fechar</button>
+        </div>
+      </div>
+      <div class="table-actions">
+        <label class="search-input-shell">
+          <span class="search-input-icon">⌕</span>
+          <input type="text" placeholder="Buscar item..." data-bom-component-picker-search />
+        </label>
+      </div>
+      <div class="table-card" style="max-height: 55vh; overflow: auto;">
+        <div data-bom-component-picker-results></div>
+      </div>
+    </div>
+  `;
+
+  const close = () => overlay.remove();
+  const results = overlay.querySelector("[data-bom-component-picker-results]");
+  const searchInput = overlay.querySelector("[data-bom-component-picker-search]");
+
+  const renderResults = (term = "") => {
+    const normalized = String(term || "").trim().toLowerCase();
+    const filtered = !normalized
+      ? components
+      : components.filter((component) =>
+        component.label.toLowerCase().includes(normalized)
+        || component.typeLabel.toLowerCase().includes(normalized)
+      );
+
+    results.innerHTML = filtered.length
+      ? filtered.map((component) => `
+          <button class="bom-file-card" type="button" data-bom-component-picker-select="${helpers.escapeHtml(component.value)}" style="width:100%; text-align:left; cursor:pointer;">
+            <div>
+              <strong>${helpers.escapeHtml(component.label)}</strong>
+              <div class="table-inline-copy muted">${helpers.escapeHtml(component.typeLabel)}</div>
+            </div>
+          </button>
+        `).join("")
+      : `<div class="empty-state">Nenhum item encontrado.</div>`;
+
+    results.querySelectorAll("[data-bom-component-picker-select]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const selected = components.find((component) => component.value === button.dataset.bomComponentPickerSelect);
+        if (!selected) return;
+        onSelect(selected, index);
+        close();
+      });
+    });
+  };
+
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay || event.target.hasAttribute("data-bom-component-picker-close")) {
+      close();
+    }
+  });
+
+  searchInput?.addEventListener("input", () => renderResults(searchInput.value));
+  document.body.appendChild(overlay);
+  renderResults("");
+  searchInput?.focus();
+}
+
 function renderBomMaterialsForm(helpers) {
+  const bomCategorySuggestions = helpers.buildBomMaterialCategoryOptions()
+    .filter((option) => option.value !== "all")
+    .map((option) => `<option value="${helpers.escapeHtml(option.value)}">${helpers.escapeHtml(option.label)}</option>`)
+    .join("");
+
   return `
     <section class="module-subpanel">
       <div class="module-head compact-head">
         <div>
-          <p class="eyebrow muted">Nova Peca / Material</p>
-          <h3>Pecas / Materiais</h3>
+          <p class="eyebrow muted">Nova Peça / Material</p>
+          <h3>Peças / Materiais</h3>
         </div>
       </div>
 
@@ -21,26 +251,25 @@ function renderBomMaterialsForm(helpers) {
         <div class="form-section form-section-full">
           <h4>Dados principais</h4>
           <div class="product-form-row">
-            ${helpers.inputField("code", "Codigo")}
+            ${helpers.inputField("code", "Código")}
             ${helpers.inputField("name", "Nome")}
-            ${helpers.selectField("category", "Categoria", [
-              { value: "raw_material", label: "Materia-prima" },
-              { value: "component", label: "Componente" },
-              { value: "subassembly", label: "Subconjunto" },
-              { value: "packaging", label: "Embalagem" },
-            ])}
+            <label>
+              Categoria
+              <input name="category" list="bom-material-category-suggestions" placeholder="Ex.: Componente" required />
+              <datalist id="bom-material-category-suggestions">${bomCategorySuggestions}</datalist>
+            </label>
             ${helpers.inputField("unit", "Unidade", "text", "un")}
           </div>
-          ${helpers.optionalTextAreaField("description", "Descricao")}
+          ${helpers.optionalTextAreaField("description", "Descrição")}
         </div>
 
         <div class="form-section form-section-full">
           <h4>Custos e estoque</h4>
           <div class="product-form-row">
-            ${helpers.currencyInputField("unit_cost", "Custo Unitario")}
+            ${helpers.currencyInputField("unit_cost", "Custo Unitário")}
             ${helpers.optionalInputField("supplier", "Fornecedor")}
             ${helpers.inputField("current_stock", "Estoque Atual", "number", "0")}
-            ${helpers.inputField("minimum_stock", "Estoque Minimo", "number", "0")}
+            ${helpers.inputField("minimum_stock", "Estoque Mínimo", "number", "0")}
           </div>
           <div class="product-form-row">
             ${helpers.selectField("status", "Status", [
@@ -60,33 +289,61 @@ function renderBomMaterialsForm(helpers) {
 }
 
 function renderBomDraftItemRow(item, index, helpers) {
-  const options = helpers.buildBomComponentOptions()
-    .map(
-      (option) => `
-        <option value="${option.value}" ${option.value === item.sourceKey ? "selected" : ""}>
-          ${option.label}
-        </option>
-      `
-    )
-    .join("");
+  const variationOptions = helpers.getBomDraftItemVariationOptions(item);
+  const variationField = variationOptions.length
+    ? `
+      <label>
+        Variação
+        <select id="bom-item-${index}-sale-option" data-bom-item-field="saleOptionId" data-bom-item-index="${index}">
+          <option value="">Sem variação</option>
+          ${variationOptions.map((option) => `
+            <option value="${helpers.escapeHtml(option.value)}" ${option.value === item.saleOptionId ? "selected" : ""}>
+              ${helpers.escapeHtml(option.label)}
+            </option>
+          `).join("")}
+        </select>
+      </label>
+    `
+    : "";
+  const productionSections = helpers.getBomFinalProductProductionSections();
+  const sectionField = productionSections.length
+    ? `
+      <label>
+        Sessão interna
+        <select id="bom-item-${index}-section" data-bom-item-field="productionSectionId" data-bom-item-index="${index}">
+          <option value="">Sem sessão</option>
+          ${productionSections.map((section) => `
+            <option value="${helpers.escapeHtml(section.id)}" ${section.id === item.productionSectionId ? "selected" : ""}>
+              ${helpers.escapeHtml(section.label)}
+            </option>
+          `).join("")}
+        </select>
+      </label>
+    `
+    : "";
   const details = helpers.getBomDraftItemComputed(item);
+  const selectedItemLabel = details.component
+    ? `${details.component.name} (${details.component.code || "sem código"})`
+    : "";
 
   return `
     <div class="bom-item-row">
       <label>
-        Peca selecionada
-        <select data-bom-item-field="sourceKey" data-bom-item-index="${index}">
-          <option value="">Selecione...</option>
-          ${options}
-        </select>
+        Item selecionado
+        <input id="bom-item-${index}-source" data-bom-item-field="sourceKey" data-bom-item-index="${index}" type="hidden" value="${helpers.escapeHtml(item.sourceKey || "")}" />
+        <span class="input-action-shell">
+          <input type="text" readonly value="${helpers.escapeHtml(selectedItemLabel)}" placeholder="Clique para buscar o item" data-bom-open-component-picker="${index}" />
+        </span>
       </label>
+      ${variationField}
+      ${sectionField}
       <label>
         Quantidade
-        <input data-bom-item-field="quantity" data-bom-item-index="${index}" type="number" min="0" step="0.0001" value="${item.quantity}" />
+        <input id="bom-item-${index}-quantity" data-bom-item-field="quantity" data-bom-item-index="${index}" type="number" min="1" step="1" value="${item.quantity}" />
       </label>
       <label>
-        Custo unitario
-        <input type="text" value="${helpers.formatCurrency(details.unitCost)}" readonly />
+        Custo unitário
+        <input id="bom-item-${index}-unit-cost" data-bom-item-field="unitCost" data-bom-item-index="${index}" type="number" min="0" step="0.01" value="${helpers.escapeHtml(details.unitCost)}" />
       </label>
       <label>
         Custo total
@@ -124,24 +381,39 @@ function renderBomAttachmentPreviews(state, helpers) {
 
 function renderBomStructuresForm(state, totalStructureCost, helpers) {
   const draft = state.bomStructureDraft;
-  const productOptions = (state.moduleData.products || []).map((product) => ({
-    value: product.id,
-    label: `${product.name} (${product.code})`,
-  }));
-  const materialOptions = state.moduleData.bomMaterials || [];
+  const productOptions = getBomFinalProductOptions(state);
+  const selectedProduct = (state.moduleData.products || []).find((product) => product.id === draft.product_id);
+  const selectedProductLabel = selectedProduct ? `${selectedProduct.name || "Produto"} (${selectedProduct.code || "sem código"})` : "";
+  const finalProductVariationOptions = helpers.getBomFinalProductVariationOptions();
+  const finalProductVariationField = finalProductVariationOptions.length
+    ? `
+      <label>
+        Variação do produto final
+        <select data-bom-structure-field="sale_option_id" name="sale_option_id">
+          <option value="">Sem variação</option>
+          ${finalProductVariationOptions.map((option) => `
+            <option value="${helpers.escapeHtml(option.value)}" ${option.value === draft.sale_option_id ? "selected" : ""}>
+              ${helpers.escapeHtml(option.label)}
+            </option>
+          `).join("")}
+        </select>
+      </label>
+    `
+    : "";
+  const componentOptions = helpers.buildBomComponentOptions();
 
   if (!productOptions.length) {
     return `
       <section class="module-subpanel">
-        <div class="empty-state">Cadastre ao menos um produto no modulo Produtos para criar um conjunto BOM.</div>
+        <div class="empty-state">Cadastre ao menos um produto no módulo Produtos para criar um conjunto BOM.</div>
       </section>
     `;
   }
 
-  if (!materialOptions.length) {
+  if (!componentOptions.length) {
     return `
       <section class="module-subpanel">
-        <div class="empty-state">Cadastre ao menos uma peca em Pecas / Materiais antes de montar um conjunto BOM.</div>
+        <div class="empty-state">Cadastre ao menos um produto, peça/material ou conjunto ativo antes de montar um conjunto BOM.</div>
       </section>
     `;
   }
@@ -160,14 +432,23 @@ function renderBomStructuresForm(state, totalStructureCost, helpers) {
         <div class="form-section form-section-full">
           <h4>Dados principais</h4>
           <div class="product-form-row">
-            ${helpers.draftSelectField("product_id", "Produto final", draft.product_id, productOptions, true)}
+            ${renderBomProductPickerField({
+              name: "product_id",
+              label: "Produto final",
+              value: helpers.escapeHtml(draft.product_id || ""),
+              displayValue: helpers.escapeHtml(selectedProductLabel),
+              required: true,
+              target: "final",
+            })}
+            ${finalProductVariationField}
             ${helpers.draftInputField("version", "Versao", draft.version, "text", "1.0", false, true)}
           </div>
         </div>
 
         <div class="form-section form-section-full">
-          <h4>Producao</h4>
+          <h4>Produção</h4>
           <div class="product-form-row">
+            ${helpers.draftInputField("category", "Categoria do BOM", draft.category, "text", "Ex.: Linha, Família, Cliente")}
             ${helpers.draftInputField("batch_size", "Tamanho do lote", draft.batch_size, "number", "1", false, true)}
             ${helpers.draftInputField("batch_unit", "Unidade do lote", draft.batch_unit, "text", "un", false, true)}
             ${helpers.draftSelectField("status", "Status", draft.status, [
@@ -182,7 +463,7 @@ function renderBomStructuresForm(state, totalStructureCost, helpers) {
             <div>
               <h4>Itens do Conjunto</h4>
             </div>
-            <button class="secondary-button" type="button" data-bom-add-item>+ Adicionar peca</button>
+            <button class="secondary-button" type="button" data-bom-add-item>+ Adicionar peça</button>
           </div>
           <div class="bom-items-list">
             ${state.bomDraftItems.map((item, index) => renderBomDraftItemRow(item, index, helpers)).join("")}
@@ -198,8 +479,8 @@ function renderBomStructuresForm(state, totalStructureCost, helpers) {
         </div>
 
         <div class="form-section form-section-full">
-          <h4>Instrucoes de Producao</h4>
-          ${helpers.draftTextAreaField("instructions", "Instrucoes de producao", draft.instructions)}
+          <h4>Instruções de Produção</h4>
+          ${helpers.draftTextAreaField("instructions", "Instruções de produção", draft.instructions)}
           <div class="product-form-row">
             ${helpers.draftInputField("height", "Altura", draft.height, "number", "0")}
             ${helpers.draftInputField("width", "Largura", draft.width, "number", "0")}
@@ -215,7 +496,7 @@ function renderBomStructuresForm(state, totalStructureCost, helpers) {
               ${renderBomAttachmentPreviews(state, helpers)}
             </div>
           </div>
-          ${helpers.draftTextAreaField("notes", "Observacoes", draft.notes)}
+          ${helpers.draftTextAreaField("notes", "Observações", draft.notes)}
         </div>
 
         <div class="form-actions-row form-section-full bom-form-actions">
@@ -235,11 +516,18 @@ export default {
     const canEdit = bridge.hasPermission("bom", "edit");
     const materials = state.moduleData.bomMaterials || [];
     const structures = state.moduleData.bomStructures || [];
+    const structureTerm = String(state.bomStructureSearch || "").trim().toLowerCase();
     const filteredMaterials = materials.filter((item) => {
       const term = state.bomMaterialSearch.trim().toLowerCase();
       if (!term) return true;
-      return [item.code, item.name, item.description, item.supplier].some((value) =>
+      return [item.code, item.name, item.description, item.category, item.supplier].some((value) =>
         String(value || "").toLowerCase().includes(term)
+      );
+    });
+    const filteredStructures = structures.filter((item) => {
+      if (!structureTerm) return true;
+      return [item.code, item.name, item.category, item.version, item.product_name, item.product_code, item.instructions].some((value) =>
+        String(value || "").toLowerCase().includes(structureTerm)
       );
     });
     const totalStructureCost = helpers.calculateBomDraftTotal();
@@ -250,12 +538,12 @@ export default {
           <div>
             <p class="eyebrow muted">Bill of Materials</p>
             <h3>BOM - Estrutura de Produtos</h3>
-            <p class="muted">Receita industrial com materiais base, subconjuntos e custo consolidado por versao.</p>
+            <p class="muted">Receita industrial com materiais base, subconjuntos e custo consolidado por versão.</p>
           </div>
           <div class="module-head-actions">
             ${
               canEdit && state.bomTab === "materials"
-                ? `<button class="primary-button" type="button" data-bom-material-create>Nova Peca/Material</button>`
+                ? `<button class="primary-button" type="button" data-bom-material-create>Nova Peça/Material</button>`
                 : ""
             }
             ${
@@ -268,9 +556,9 @@ export default {
 
         <div class="summary-grid">
           ${helpers.renderKpiCard({
-            label: "Pecas e Materiais",
+            label: "Peças e Materiais",
             value: materials.length,
-            note: materials.length ? "Base tecnica cadastrada" : "Nenhum item cadastrado",
+            note: materials.length ? "Base técnica cadastrada" : "Nenhum item cadastrado",
             icon: "⊞",
             tone: "blue",
           })}
@@ -284,14 +572,14 @@ export default {
           ${helpers.renderKpiCard({
             label: "Rascunhos",
             value: structures.filter((item) => item.status === "draft").length,
-            note: "Edicao liberada antes da ativacao",
+            note: "Edicao liberada antes da ativação",
             icon: "◩",
             tone: "amber",
           })}
         </div>
 
         <div class="bom-tabs">
-          <button class="bom-tab-button ${state.bomTab === "materials" ? "active" : ""}" type="button" data-bom-tab="materials">Pecas / Materiais</button>
+          <button class="bom-tab-button ${state.bomTab === "materials" ? "active" : ""}" type="button" data-bom-tab="materials">Peças / Materiais</button>
           <button class="bom-tab-button ${state.bomTab === "structures" ? "active" : ""}" type="button" data-bom-tab="structures">Conjuntos (BOM)</button>
         </div>
 
@@ -303,23 +591,23 @@ export default {
                   ? state.bomMaterialFormVisible
                     ? renderBomMaterialsForm(helpers)
                     : ""
-                  : `<div class="empty-state">Seu perfil pode visualizar este modulo, mas nao pode editar.</div>`
+                  : `<div class="empty-state">Seu perfil pode visualizar este módulo, mas não pode editar.</div>`
               }
               <section class="module-subpanel">
                 <div class="module-head compact-head">
                   <div>
                     <p class="eyebrow muted">Consulta</p>
-                    <h3>Pecas cadastradas</h3>
+                    <h3>Peças cadastradas</h3>
                   </div>
                 </div>
                 <div class="table-actions single-search-row">
                   <label>
-                    Buscar pecas...
-                    <input id="bom-material-search" type="text" placeholder="Buscar pecas..." value="${helpers.escapeHtml(state.bomMaterialSearch)}" />
+                    Buscar peças...
+                    <input id="bom-material-search" type="text" placeholder="Buscar peças..." value="${helpers.escapeHtml(state.bomMaterialSearch)}" />
                   </label>
                 </div>
                 ${helpers.renderTable(
-                  ["Codigo", "Nome", "Descricao", "Categoria", "Unidade", "Custo", "Fornecedor", "Estoque", "Minimo", "Status", "Acao"],
+                  ["Código", "Nome", "Descrição", "Categoria", "Unidade", "Custo", "Fornecedor", "Estoque", "Mínimo", "Status", "Ação"],
                   filteredMaterials.map((item) => [
                     item.code,
                     item.name,
@@ -331,7 +619,7 @@ export default {
                     helpers.formatQuantity(item.current_stock),
                     helpers.formatQuantity(item.minimum_stock),
                     helpers.materialStatusCell(item.status),
-                    helpers.deleteButtonCell("bom_materials", item.id, canEdit),
+                    renderBomMaterialActionCell(item, canEdit),
                   ])
                 )}
               </section>
@@ -342,7 +630,7 @@ export default {
                   ? state.bomStructureFormVisible
                     ? renderBomStructuresForm(state, totalStructureCost, helpers)
                     : ""
-                  : `<div class="empty-state">Seu perfil pode visualizar este modulo, mas nao pode editar.</div>`
+                  : `<div class="empty-state">Seu perfil pode visualizar este módulo, mas não pode editar.</div>`
               }
               <section class="module-subpanel">
                 <div class="module-head compact-head">
@@ -351,11 +639,18 @@ export default {
                     <h3>Conjuntos BOM</h3>
                   </div>
                 </div>
+                <div class="table-actions single-search-row">
+                  <label>
+                    Buscar conjunto...
+                    <input id="bom-structure-search" type="text" placeholder="Buscar conjunto..." value="${helpers.escapeHtml(state.bomStructureSearch || "")}" />
+                  </label>
+                </div>
                 ${helpers.renderTable(
-                  ["Codigo", "Nome", "Versao", "Lote", "Status", "Custo Total", "Itens", "Instrucoes", "Acao"],
-                  structures.map((item) => [
+                  ["Código", "Nome", "Categoria", "Versao", "Lote", "Status", "Custo Total", "Itens", "Instruções", "Ação"],
+                  filteredStructures.map((item) => [
                     item.code,
                     item.name,
+                    helpers.formatBomCategory(item.category),
                     item.version,
                     `${helpers.formatQuantity(item.batch_size)} ${item.batch_unit}`,
                     helpers.bomStructureStatusCell(item.status),
@@ -419,6 +714,9 @@ export default {
     helpers.bindDeferredTextFilter("#bom-material-search", (value) => {
       state.bomMaterialSearch = value;
     });
+    helpers.bindDeferredTextFilter("#bom-structure-search", (value) => {
+      state.bomStructureSearch = value;
+    });
 
     document.querySelector("#bom-material-form")?.addEventListener("submit", helpers.handleBomMaterialSubmit);
 
@@ -436,6 +734,26 @@ export default {
     document.querySelectorAll("[data-bom-structure-field]").forEach((field) => {
       field.addEventListener("input", helpers.handleBomStructureDraftFieldChange);
       field.addEventListener("change", helpers.handleBomStructureDraftFieldChange);
+    });
+
+    document.querySelectorAll("[data-bom-open-product-picker='final']").forEach((field) => {
+      field.addEventListener("click", () => {
+        openBomFinalProductPicker({
+          state,
+          helpers,
+          onSelect: (product) => {
+            state.bomStructureDraft.product_id = product.value;
+            state.bomStructureDraft.product_code = product.code || "";
+            state.bomStructureDraft.product_name = product.name || "";
+            state.bomStructureDraft.sale_option_id = "";
+            state.bomStructureDraft.sale_option_code = "";
+            state.bomStructureDraft.sale_option_label = "";
+            state.bomStructureDraft.name = product.name || "";
+            state.bomDraftItems = state.bomDraftItems.map((item) => ({ ...item, productionSectionId: "" }));
+            helpers.renderActiveModule();
+          },
+        });
+      });
     });
 
     const structureForm = document.querySelector("#bom-structure-form");
@@ -466,6 +784,31 @@ export default {
       field.addEventListener("change", helpers.handleBomDraftItemFieldChange);
     });
 
+    document.querySelectorAll("[data-bom-open-component-picker]").forEach((field) => {
+      field.addEventListener("click", () => {
+        const index = Number(field.dataset.bomOpenComponentPicker);
+        openBomComponentPicker({
+          state,
+          helpers,
+          index,
+          onSelect: (component, selectedIndex) => {
+            if (!state.bomDraftItems[selectedIndex]) return;
+            const nextItem = {
+              ...state.bomDraftItems[selectedIndex],
+              sourceKey: component.value,
+              saleOptionId: "",
+            };
+            const computed = helpers.getBomDraftItemComputed(nextItem);
+            state.bomDraftItems[selectedIndex] = {
+              ...nextItem,
+              unitCost: computed.component ? String(Number(computed.unitCost || 0)) : "",
+            };
+            helpers.renderActiveModule();
+          },
+        });
+      });
+    });
+
     document.querySelector("#bom-file-upload")?.addEventListener("change", helpers.handleBomFileSelection);
 
     document.querySelectorAll("[data-bom-remove-file]").forEach((button) => {
@@ -480,6 +823,72 @@ export default {
         const structure = state.moduleData.bomStructures.find((item) => item.id === button.dataset.bomStructureEditId);
         if (!structure) return;
         helpers.hydrateBomDraftFromStructure(structure);
+        state.bomTab = "structures";
+        state.bomMaterialFormVisible = false;
+        state.bomStructureFormVisible = true;
+        await helpers.renderActiveModule();
+        document.querySelector("#bom-structure-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    });
+
+    document.querySelectorAll("[data-bom-material-edit-id]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const material = state.moduleData.bomMaterials.find((item) => item.id === button.dataset.bomMaterialEditId);
+        if (!material) return;
+
+        state.bomTab = "materials";
+        state.bomStructureFormVisible = false;
+        state.bomMaterialFormVisible = true;
+        await helpers.renderActiveModule();
+
+        const editForm = document.querySelector("#bom-material-form");
+        if (!editForm) return;
+
+        helpers.populateForm(editForm, material);
+        editForm.elements.namedItem("edit_id").value = material.id;
+        helpers.bindCurrencyInputs(editForm);
+        editForm.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    });
+
+    document.querySelectorAll("[data-bom-material-duplicate-id]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const material = state.moduleData.bomMaterials.find((item) => item.id === button.dataset.bomMaterialDuplicateId);
+        if (!material) return;
+
+        const duplicatedMaterial = buildDuplicateBomMaterialDraft(material, state.moduleData.bomMaterials);
+        state.bomTab = "materials";
+        state.bomStructureFormVisible = false;
+        state.bomMaterialFormVisible = true;
+        await helpers.renderActiveModule();
+
+        const createForm = document.querySelector("#bom-material-form");
+        if (!createForm) return;
+
+        helpers.populateForm(createForm, duplicatedMaterial);
+        createForm.elements.namedItem("edit_id").value = "";
+        helpers.bindCurrencyInputs(createForm);
+        createForm.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    });
+
+    document.querySelectorAll("[data-bom-structure-duplicate-id]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const structure = state.moduleData.bomStructures.find((item) => item.id === button.dataset.bomStructureDuplicateId);
+        if (!structure) return;
+
+        helpers.hydrateBomDraftFromStructure(structure);
+        state.bomStructureDraft.edit_id = "";
+        state.bomStructureDraft.code = buildDuplicateTextValue(
+          structure.code,
+          (state.moduleData.bomStructures || []).map((item) => item.code),
+          "-COPIA"
+        );
+        state.bomStructureDraft.name = buildDuplicateTextValue(
+          structure.name,
+          (state.moduleData.bomStructures || []).map((item) => item.name),
+          " (Cópia)"
+        );
         state.bomTab = "structures";
         state.bomMaterialFormVisible = false;
         state.bomStructureFormVisible = true;
